@@ -1,0 +1,1 @@
+## Base Template for Stepman.AI Projects
