@@ -18,4 +18,4 @@ ADD . /app
 # Sync the project
 RUN uv sync --frozen
 
-CMD [ "python", "{{ project_name.lower() }}/foo.py"]
+CMD [ "python", "acubed/foo.py"]
