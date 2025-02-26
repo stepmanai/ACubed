@@ -1,4 +1,4 @@
-from {{ project_name.lower() }}.foo import foo
+from acubed.foo import foo
 
 
 def test_foo():
