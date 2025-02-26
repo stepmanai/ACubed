@@ -1,0 +1,52 @@
+site_name: {{ project_name }}
+repo_url: https://github.com/stepmanai/{{ project_name }}
+site_url: https://stepmanai.github.io/{{ project_name }}
+site_description:{{ '' if project_description == '' else ' ' ~ project_description }}
+site_author: Stepman.AI Developers and Maintainers
+edit_uri: edit/main/docs/
+repo_name: stepmanai/{{ project_name }}
+copyright: Maintained by <a href="https://stepmanai.com">stepmanai</a>.
+
+nav:
+  - Home: index.md
+  - Modules: modules.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["{{ project_name.lower() }}"]
+theme:
+  name: material
+  feature:
+    tabs: true
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/stepmanai/{{ project_name }}
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/{{ project_name }}
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
