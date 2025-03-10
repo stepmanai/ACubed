@@ -12,7 +12,7 @@ def foo(bar: str) -> str:
     print("Hello World!")
     return bar
 
-def fooasdf(bar: str) -> str:
+def foozeball(bar: str) -> str:
     """Summary line.
 
     Extended description of function.
@@ -23,7 +23,7 @@ def fooasdf(bar: str) -> str:
     Returns:
         Description of return value
     """
-    print("Hello World!")
+    print("Hello Worlds!")
     return bar
 
 if __name__ == "__main__":  # pragma: no cover
