@@ -12,5 +12,6 @@ def foo(bar: str) -> str:
     print("Hello World!")
     return bar
 
+
 if __name__ == "__main__":  # pragma: no cover
     pass
