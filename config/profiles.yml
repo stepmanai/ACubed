@@ -1,0 +1,17 @@
+training:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ./duckdb/ffr.duckdb
+      extensions: []
+      threads: 2
+
+debug:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ./duckdb/ffr_debug.duckdb
+      extensions: []
+      threads: 2

@@ -1,0 +1,63 @@
+version: 2
+
+sources:
+  - name: features
+    schema: charts
+    tables:
+      - name: metadata
+        description: "Song metadata with author, genre, difficulty, and timing info"
+        columns:
+          - name: id
+            description: "Unique ID of the song"
+            tests:
+              - not_null
+              - unique
+          - name: name
+            description: "Name of the song"
+          - name: author
+            description: "Author of the song"
+          - name: author_url
+            description: "Author's website or URL"
+          - name: stepauthor
+            description: "Creator of the step chart"
+          - name: genre
+            description: "Genre ID"
+          - name: difficulty
+            description: "Difficulty level"
+          - name: length
+            description: "Length of the song"
+          - name: note_count
+            description: "Total note count"
+          - name: min_nps
+            description: "Minimum notes per second"
+          - name: max_nps
+            description: "Maximum notes per second"
+          - name: timestamp
+            description: "Timestamp of song creation"
+          - name: timestamp_format
+            description: "Format of the timestamp"
+          - name: swf_version
+            description: "SWF version timestamp"
+
+      - name: steps
+        description: "Step chart data linked to metadata"
+        columns:
+          - name: note_id
+            description: "Unique identifier for each note"
+            tests:
+              - not_null
+              - unique
+          - name: song_id
+            description: "Foreign key linking to metadata.id"
+            tests:
+              - not_null
+          - name: index
+            description: "Note index in the song"
+          - name: framers
+            description: "Frame count between notes"
+          - name: orientation
+            description: "Orientation metadata"
+          - name: color
+            description: "Color code for the note"
+          - name: timestamp
+            description: "Timing of the note event"

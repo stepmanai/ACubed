@@ -1,0 +1,23 @@
+{
+   "note_id":{
+      "data_type":"text"
+   },
+   "song_id":{
+      "data_type":"bigint"
+   },
+   "index":{
+      "data_type":"bigint"
+   },
+   "framers":{
+      "data_type":"bigint"
+   },
+   "orientation":{
+      "data_type":"bigint"
+   },
+   "color":{
+      "data_type":"bigint"
+   },
+   "timestamp":{
+      "data_type":"bigint"
+   }
+}

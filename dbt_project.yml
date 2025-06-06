@@ -1,0 +1,21 @@
+name: ffr_difficulty_model
+version: 1.0
+config-version: 2
+
+profile: training
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+vars:
+  concentration_multiplier: 0.005
+  density_thresholds:
+    - [ -117, -83, 0.1 ]
+    - [ -83,  -50, 0.5 ]
+    - [ -50,  -17, 1.0 ]
+    - [ -17,   17, 1.0 ]
+    - [  17,   50, 1.0 ]
+    - [  50,  118, 0.5 ]
+  stamina_discount_factor: 0.5
+  stamina_window: 30
+  surrogate_key_treat_nulls_as_empty_strings: true
