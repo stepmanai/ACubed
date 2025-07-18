@@ -1,7 +1,7 @@
 [project]
-name = "{{ project_name.lower() }}"
+name = "acubed"
 version = "0.0.1"
-description = "{{ project_description }}"
+description = "A model training framework for building stepfile difficulty prediction models for open source rhythm games."
 authors = [{ name = "Stepman.AI Developers and Maintainers", email = "contact.acubed@gmail.com" }]
 readme = "README.md"
 keywords = ['python']
@@ -19,9 +19,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://stepmanai.github.io/{{ project_name }}/"
-Repository = "https://github.com/stepmanai/{{ project_name }}"
-Documentation = "https://stepmanai.github.io/{{ project_name }}/"
+Homepage = "https://stepmanai.github.io/ACubed/"
+Repository = "https://github.com/stepmanai/ACubed"
+Documentation = "https://stepmanai.github.io/ACubed/"
 
 [dependency-groups]
 dev = [
@@ -41,10 +41,10 @@ requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["{{ project_name.lower() }}"]
+py-modules = ["acubed"]
 
 [tool.mypy]
-files = ["{{ project_name.lower() }}"]
+files = ["acubed"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true

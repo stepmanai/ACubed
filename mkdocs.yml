@@ -1,10 +1,10 @@
-site_name: {{ project_name }}
-repo_url: https://github.com/stepmanai/{{ project_name }}
-site_url: https://stepmanai.github.io/{{ project_name }}
-site_description:{{ '' if project_description == '' else ' ' ~ project_description }}
+site_name: ACubed
+repo_url: https://github.com/stepmanai/ACubed
+site_url: https://stepmanai.github.io/ACubed
+site_description: A model training framework for building stepfile difficulty prediction models for open source rhythm games.
 site_author: Stepman.AI Developers and Maintainers
 edit_uri: edit/main/docs/
-repo_name: stepmanai/{{ project_name }}
+repo_name: stepmanai/ACubed
 copyright: Maintained by <a href="https://stepmanai.com">stepmanai</a>.
 
 nav:
@@ -15,7 +15,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: ["{{ project_name.lower() }}"]
+          paths: ["acubed"]
 theme:
   name: material
   feature:
@@ -41,9 +41,9 @@ theme:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/stepmanai/{{ project_name }}
+      link: https://github.com/stepmanai/ACubed
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/{{ project_name }}
+      link: https://pypi.org/project/ACubed
 
 markdown_extensions:
   - toc:
