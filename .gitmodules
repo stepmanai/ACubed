@@ -1,0 +1,6 @@
+[submodule "huggingface/datasets/ffr/charts"]
+	path = huggingface/datasets/ffr/charts
+	url = https://huggingface.co/datasets/stepmanai/ffr_charts
+[submodule "huggingface/models/ffr/difficulty_model"]
+	path = huggingface/models/ffr/difficulty_model
+	url = https://huggingface.co/stepmanai/ffr_difficulty_model
