@@ -17,6 +17,12 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+dependencies = [
+    "aiohttp>=3.12.14",
+    "numpy>=2.0.2",
+    "tqdm>=4.67.1",
+    "types-tqdm>=4.67.0.20250516",
+]
 
 [project.urls]
 Homepage = "https://stepmanai.github.io/ACubed/"
