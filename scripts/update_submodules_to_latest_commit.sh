@@ -21,7 +21,4 @@ uv run git submodule foreach '
 '
 
 echo "✅ Submodules updated. Committing submodule pointer changes..."
-uv run git add .
-uv run git commit -m "Update submodules to latest commits (rebase)"
-
 echo "🚀 Done."
