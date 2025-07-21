@@ -9,6 +9,8 @@ install: ## Install the virtual environment and install the pre-commit hooks
 ffr-charts: ## Upload FFR charts to HuggingFace Datasets repo
 	@echo "🚀 Downloading dataset from Flash Flash Revolution's API..."
 	@uv run python huggingface/datasets/ffr/charts/download_ffr_charts.py
+	@uv run scripts/update_huggingface.py --repo-id stepmanai/ffr_charts --folder huggingface/datasets/ffr/charts --repo-type dataset
+	@uv run scripts/update_submodules_to_latest_commit.sh
 
 .PHONY: check
 check: ## Run code quality tools.
