@@ -2,7 +2,7 @@
 install: ## Install the virtual environment, pull submodules, and install the pre-commit hooks
 	@echo "🚀 Creating virtual environment using uv"
 	@uv sync
-	@sudo apt install moreutils
+	@sudo apt install -y moreutils
 	@uv run pre-commit install
 	@uv run git submodule init
 	@uv run git submodule update --remote --merge --recursive

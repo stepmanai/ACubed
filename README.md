@@ -16,6 +16,45 @@ A model training framework for building stepfile difficulty prediction models fo
 - **Github repository**: <https://github.com/stepmanai/ACubed/>
 - **Documentation** <https://stepmanai.github.io/ACubed/>
 
+---
+
+## WSL + Ubuntu 22.04.5 Setup (Optional)
+
+If you're using **Windows Subsystem for Linux (WSL)**, here are the steps to install and configure the project using **Ubuntu 22.04.5 LTS**:
+
+1. **Install Ubuntu 22.04.5 LTS in WSL**
+
+   Follow the guide at: [https://dev.linuxconfig.org/ubuntu-22-04-on-wsl-windows-subsystem-for-linux](https://dev.linuxconfig.org/ubuntu-22-04-on-wsl-windows-subsystem-for-linux)
+
+2. **Install Dependencies**
+
+   ```bash
+   sudo apt update
+   curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+   sudo apt install -y make python3-pip jq git-lfs
+   wget -qO- https://astral.sh/uv/install.sh | sh
+   source $HOME/.local/bin/env
+   ```
+
+3. **Set up Git LFS**
+
+   ```bash
+   git lfs install
+   git lfs track "*.jsonl"
+   git add .gitattributes
+   ```
+
+4. **Clone the Repository and Start Development**
+
+   ```bash
+   git clone https://github.com/stepmanai/ACubed.git
+   cd ACubed
+   make install
+   code .
+   ```
+
+---
+
 ## Prerequisites:
 
 Based on [Copier's installation requirements](https://github.com/copier-org/copier?tab=readme-ov-file#installation), this project is natively supported on `Ubuntu 22.04` (`ubuntu:jammy`) and later versions.
