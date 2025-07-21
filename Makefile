@@ -2,7 +2,13 @@
 install: ## Install the virtual environment and install the pre-commit hooks
 	@echo "🚀 Creating virtual environment using uv"
 	@uv sync
+	@sudo apt install moreutils
 	@uv run pre-commit install
+
+.PHONY: ffr-charts
+ffr-charts: ## Upload FFR charts to HuggingFace Datasets repo
+	@echo "🚀 Downloading dataset from Flash Flash Revolution's API..."
+	@uv run python huggingface/datasets/ffr/charts/download_ffr_charts.py
 
 .PHONY: check
 check: ## Run code quality tools.

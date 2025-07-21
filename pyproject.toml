@@ -19,7 +19,10 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp>=3.12.14",
+    "datasets>=4.0.0",
+    "huggingface-hub>=0.33.4",
     "numpy>=2.0.2",
+    "python-dotenv>=1.1.1",
     "tqdm>=4.67.1",
     "types-tqdm>=4.67.0.20250516",
 ]

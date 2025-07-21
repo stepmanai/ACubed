@@ -9,7 +9,7 @@ from tqdm import tqdm
 from .preprocessor import FFRChartPreprocessor
 
 
-class FFRDatabaseConnectorOptimized(FFRChartPreprocessor):
+class FFRDatabaseConnector(FFRChartPreprocessor):
     def __init__(self, config: dict):
         super().__init__()
         self.password: str = config["password"]
@@ -39,7 +39,7 @@ class FFRDatabaseConnectorOptimized(FFRChartPreprocessor):
                 logging.exception(f"Exception during fetch {url}")
         return None
 
-    async def download_charts(self, output_path: str = "charts.jsonl") -> None:
+    async def download_charts(self, output_path: str) -> None:
         semaphore = asyncio.Semaphore(self.THREAD_POOL)
         timeout = ClientTimeout(total=30)
         charts = []
@@ -48,7 +48,7 @@ class FFRDatabaseConnectorOptimized(FFRChartPreprocessor):
             tasks = [self.fetch(session, url, semaphore) for url in self.urls]
 
             with open(output_path, "w", encoding="utf-8") as f:
-                for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Downloading charts"):
+                for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Downloading..."):
                     res = await future
                     if res:
                         try:
@@ -73,6 +73,6 @@ class FFRDatabaseConnectorOptimized(FFRChartPreprocessor):
                 logging.exception("Failed to fetch songlist")
                 self.urls = []
 
-    async def run(self) -> None:
+    async def run(self, output_path: str) -> None:
         await self._get_chart_urls()
-        await self.download_charts()
+        await self.download_charts(output_path)
