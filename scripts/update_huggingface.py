@@ -10,7 +10,11 @@ def main():
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="Upload a folder to the Hugging Face Hub.")
-    parser.add_argument("--repo-id", required=True, help="Hugging Face dataset repo ID (e.g. stepmanai/ffr_charts)")
+    parser.add_argument(
+        "--repo-id",
+        required=True,
+        help="Hugging Face dataset repo ID (e.g. stepmanai/ffr_charts)",
+    )
     parser.add_argument("--folder", required=True, help="Local folder path to upload")
     parser.add_argument(
         "--repo-type",
@@ -25,7 +29,12 @@ def main():
     if not args.token:
         raise ValueError()
 
-    upload_folder(folder_path=args.folder, repo_id=args.repo_id, repo_type=args.repo_type, token=args.token)
+    upload_folder(
+        folder_path=args.folder,
+        repo_id=args.repo_id,
+        repo_type=args.repo_type,
+        token=args.token,
+    )
 
     print(f"✅ Successfully uploaded to: https://huggingface.co/{args.repo_type}s/{args.repo_id}")
 

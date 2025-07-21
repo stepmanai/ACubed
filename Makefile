@@ -9,8 +9,19 @@ install: ## Install the virtual environment and install the pre-commit hooks
 ffr-charts: ## Upload FFR charts to HuggingFace Datasets repo
 	@echo "🚀 Downloading dataset from Flash Flash Revolution's API..."
 	@uv run python huggingface/datasets/ffr/charts/download_ffr_charts.py
-	@uv run scripts/update_huggingface.py --repo-id stepmanai/ffr_charts --folder huggingface/datasets/ffr/charts --repo-type dataset
+	@uv run scripts/update_huggingface.py \
+		--repo-id stepmanai/ffr_charts \
+		--folder huggingface/datasets/ffr/charts \
+		--repo-type dataset
 	@uv run scripts/update_submodules_to_latest_commit.sh
+
+.PHONY: clean
+clean: ## Factory reset workspace in local environment
+	@echo "🧹 Cleaning up build, bytecode, and documentation files..."
+	@find . -type d -name '__pycache__' -exec rm -rf {} +
+	@find . -type f -name '*.py[co]' -delete
+	@rm -rf .venv dist build .mypy_cache .pytest_cache .ruff_cache site acubed.egg-info
+	@echo "✅ Clean complete."
 
 .PHONY: check
 check: ## Run code quality tools.
