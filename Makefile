@@ -1,9 +1,11 @@
 .PHONY: install
-install: ## Install the virtual environment and install the pre-commit hooks
+install: ## Install the virtual environment, pull submodules, and install the pre-commit hooks
 	@echo "🚀 Creating virtual environment using uv"
 	@uv sync
 	@sudo apt install moreutils
 	@uv run pre-commit install
+	@uv run git submodule init
+	@uv run git submodule update --remote --merge --recursive
 
 .PHONY: ffr-charts
 ffr-charts: ## Upload FFR charts to HuggingFace Datasets repo
