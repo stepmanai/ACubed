@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientSession, ClientTimeout  # type: ignore  # noqa: PGH003
 from tqdm import tqdm
 
 from .preprocessor import FFRChartPreprocessor
