@@ -16,48 +16,13 @@ A model training framework for building stepfile difficulty prediction models fo
 - **Github repository**: <https://github.com/stepmanai/ACubed/>
 - **Documentation** <https://stepmanai.github.io/ACubed/>
 
----
-
-## WSL + Ubuntu 22.04.5 Setup (Optional)
-
-If you're using **Windows Subsystem for Linux (WSL)**, here are the steps to install and configure the project using **Ubuntu 22.04.5 LTS**:
-
-1. **Install Ubuntu 22.04.5 LTS in WSL**
-
-   Follow the guide at: [https://dev.linuxconfig.org/ubuntu-22-04-on-wsl-windows-subsystem-for-linux](https://dev.linuxconfig.org/ubuntu-22-04-on-wsl-windows-subsystem-for-linux)
-
-2. **Install Dependencies**
-
-   ```bash
-   sudo apt update
-   curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-   sudo apt install -y make python3-pip jq git-lfs
-   wget -qO- https://astral.sh/uv/install.sh | sh
-   source $HOME/.local/bin/env
-   ```
-
-3. **Set up Git LFS**
-
-   ```bash
-   git lfs install
-   git lfs track "*.jsonl"
-   git add .gitattributes
-   ```
-
-4. **Clone the Repository and Start Development**
-
-   ```bash
-   git clone https://github.com/stepmanai/ACubed.git
-   cd ACubed
-   make install
-   code .
-   ```
-
----
+- **Datasets**: <https://huggingface.co/datasets/stepmanai/ffr_charts>
 
 ## Prerequisites:
 
 Based on [Copier's installation requirements](https://github.com/copier-org/copier?tab=readme-ov-file#installation), this project is natively supported on `Ubuntu 22.04` (`ubuntu:jammy`) and later versions.
+
+For Windows users, you can download `Ubuntu 22.04` from the Microsoft Store after setting up Windows Subsystem for Linux (WSL). Instructions provided [here](https://learn.microsoft.com/en-us/windows/wsl/install).
 
 > **Note**: The following instructions assume you have access to this repository. If you need to request access, please contact us.
 
@@ -69,6 +34,7 @@ Begin by cloning the repository to a specific location on your local machine.
 
 ```bash
 git clone https://github.com/stepmanai/ACubed.git
+cd ACubed
 ```
 
 ### 2. Install Required Local Dependencies
@@ -78,11 +44,25 @@ Next, install the necessary dependencies by executing the following commands:
 > **Note**: You may skip some of these if they are already installed on your machine.
 
 ```bash
-sudo apt install make python3-pip
-pip install uv
+sudo apt update
+sudo apt install -y make python3-pip jq git-lfs
 ```
 
-### 3. Set Up Your Development Environment
+### 3. Install `uv`
+
+```bash
+wget -qO- https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+```
+
+### 4. Initialize `git lfs`
+
+```bash
+curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+git lfs install
+```
+
+### 5. Set Up Your Development Environment
 
 Finally, set up your development environment and install pre-commit hooks with:
 
@@ -90,12 +70,20 @@ Finally, set up your development environment and install pre-commit hooks with:
 make install
 ```
 
-### 4. Test pre-commit hooks
+### 6. Test pre-commit hooks
 
 Verify that the checks in the pre-commit hooks does not fail by running the following command:
 
 ```bash
 uv run pre-commit run -a
+```
+
+### 7. Initialize Visual Studio Code
+
+Run the following command to open up a code editor:
+
+```bash
+code .
 ```
 
 You are now ready to start development on your project!
