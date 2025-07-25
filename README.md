@@ -46,12 +46,12 @@ ssh-add ~/.ssh/id_ed25519
 cat ~/.ssh/id_ed25519.pub
 
 ```
+
 </details>
 
 - **GitHub:** [Add SSH Key](https://github.com/settings/keys)
 
 - **Hugging Face:** [Add SSH Key](https://huggingface.co/settings/keys)
-
 
 You can verify SSH setup with:
 
@@ -59,6 +59,7 @@ You can verify SSH setup with:
 ssh -T git@github.com
 ssh -T git@hf.co
 ```
+
 ### 2. Clone the Repository to Your Local Environment
 
 Begin by cloning the repository to a specific location on your local machine.
