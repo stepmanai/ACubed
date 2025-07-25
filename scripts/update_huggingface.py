@@ -1,5 +1,6 @@
 import argparse
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from huggingface_hub import upload_folder
@@ -29,11 +30,15 @@ def main():
     if not args.token:
         raise ValueError()
 
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    commit_message = f"🔄 [{timestamp}] Automated upload via update_huggingface.py"
+
     upload_folder(
         folder_path=args.folder,
         repo_id=args.repo_id,
         repo_type=args.repo_type,
         token=args.token,
+        commit_message=commit_message,
     )
 
     print(f"✅ Successfully uploaded to: https://huggingface.co/{args.repo_type}s/{args.repo_id}")
