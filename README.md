@@ -28,16 +28,47 @@ For Windows users, you can download `Ubuntu 22.04` from the Microsoft Store afte
 
 ## Getting Started with Your Project
 
-### 1. Clone the Repository to Your Local Environment
+### 1. ✅ Setup SSH Keys in GitHub and Hugging Face
+
+Make sure you have a single SSH key configured for both platforms:
+
+<details>
+<summary>Click to expand SSH key setup steps</summary>
+
+```bash
+# Generate a new SSH key (if you don't have one)
+ssh-keygen -t ed25519 -C "your_email@example.com"
+
+# Add the key to your SSH agent
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+# Copy the public key to clipboard
+cat ~/.ssh/id_ed25519.pub
+
+```
+</details>
+
+- **GitHub:** [Add SSH Key](https://github.com/settings/keys)
+
+- **Hugging Face:** [Add SSH Key](https://huggingface.co/settings/keys)
+
+
+You can verify SSH setup with:
+
+```bash
+ssh -T git@github.com
+ssh -T git@hf.co
+```
+### 2. Clone the Repository to Your Local Environment
 
 Begin by cloning the repository to a specific location on your local machine.
 
 ```bash
-git clone https://github.com/stepmanai/ACubed.git
+git clone git@github.com:stepmanai/ACubed.git
 cd ACubed
 ```
 
-### 2. Install Required Local Dependencies
+### 3. Install Required Local Dependencies
 
 Next, install the necessary dependencies by executing the following commands:
 
@@ -48,21 +79,21 @@ sudo apt update
 sudo apt install -y make python3-pip jq git-lfs
 ```
 
-### 3. Install `uv`
+### 4. Install `uv`
 
 ```bash
 wget -qO- https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 ```
 
-### 4. Initialize `git lfs`
+### 5. Initialize `git lfs`
 
 ```bash
 curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
 git lfs install
 ```
 
-### 5. Set Up Your Development Environment
+### 6. Set Up Your Development Environment
 
 Finally, set up your development environment and install pre-commit hooks with:
 
@@ -70,7 +101,7 @@ Finally, set up your development environment and install pre-commit hooks with:
 make install
 ```
 
-### 6. Test pre-commit hooks
+### 7. Test pre-commit hooks
 
 Verify that the checks in the pre-commit hooks does not fail by running the following command:
 
@@ -78,7 +109,7 @@ Verify that the checks in the pre-commit hooks does not fail by running the foll
 uv run pre-commit run -a
 ```
 
-### 7. Initialize Visual Studio Code
+### 8. Initialize Visual Studio Code
 
 Run the following command to open up a code editor:
 
