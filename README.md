@@ -18,6 +18,7 @@ At its core, ACubed provides tools to train, evaluate, and apply predictive mode
 Whether you're enhancing a legacy engine or building the next generation of rhythm games, ACubed provides a modular and extensible foundation for intelligent difficulty estimation and cross-platform standardization.
 
 ## Relevant Links
+
 - **Github repository**: <https://github.com/stepmanai/ACubed/>
 - **Documentation** <https://stepmanai.github.io/ACubed/>
 
@@ -37,6 +38,7 @@ For Windows users, you can download `Ubuntu 22.04` from the Microsoft Store afte
 ‎<summary><h6>‎ ‎ ‎ ‎ Click to expand steps</h6></summary>
 
 #### a) Generate a new SSH key (if you don't have one)
+
 ```console
 foo@bar:~$ ssh-keygen -t ed25519 -C "your_email@example.com"
 Your identification has been saved in /home/foo/.ssh/id_ed25519
@@ -58,6 +60,7 @@ The key's randomart image is:
 ```
 
 #### b) Start the SSH agent and add the key.
+
 ```console
 foo@bar:~$ eval "$(ssh-agent -s)"
 Agent pid 111
@@ -66,6 +69,7 @@ Identity added: /home/foo/.ssh/id_ed25519 (your_email@example.com)
 ```
 
 #### c) Copy the public key to clipboard.
+
 ```console
 foo@bar:~$ cat ~/.ssh/id_ed25519.pub
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeDummyKeyForTestingPurposesOnly1234567890 your_email@example.com
@@ -83,8 +87,8 @@ Hi foo, welcome to Hugging Face.
 ```
 
 #### f) [Create User Access Token](https://huggingface.co/settings/tokens) in Hugging Face.
-</details>
 
+</details>
 
 ### 2. Setup Secrets to Access Rhythm Game Data
 
@@ -98,8 +102,6 @@ Make sure to log in [Flash Flash Revolution](https://www.flashflashrevolution.co
 <img width="1778" height="488" alt="image" src="https://github.com/user-attachments/assets/4c6a6537-4e81-4117-9101-3ccb57804a34" />
 
 </details>
-
-
 
 ### 3. Clone the Repository to Your Local Environment via SSH
 
@@ -125,17 +127,21 @@ foo@bar:~/ACubed$ sudo apt install -y make python3-pip jq git-lfs
 ```
 
 #### b) Install `uv`.
+
 - `uv`: A fast Python package manager and build tool designed as a drop-in replacement for pip, pip-tools, and virtualenv.
+
 ```console
 foo@bar:~/ACubed$ wget -qO- https://astral.sh/uv/install.sh | sh
 foo@bar:~/ACubed$ source $HOME/.local/bin/env
 ```
 
 #### c) Initialize `git lfs`.
+
 ```console
 foo@bar:~/ACubed$ curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
 foo@bar:~/ACubed$ git lfs install
 ```
+
 </details>
 
 ### 7. Set Up Your Development Environment
