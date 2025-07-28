@@ -11,8 +11,13 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/stepmanai/ACubed)](https://img.shields.io/github/commit-activity/m/stepmanai/ACubed)
 [![License](https://img.shields.io/github/license/stepmanai/ACubed)](https://img.shields.io/github/license/stepmanai/ACubed)
 
-A model training framework for building stepfile difficulty prediction models for open source rhythm games.
+**ACubed** is a model training framework designed to bring data-driven stepfile difficulty prediction to open source rhythm games. Inspired by the spirit of [rCubed](https://github.com/flashflashrevolution/rCubed), a transformative upgrade to the Flash Flash Revolution (FFR) game engine, ACubed aims to modernize and enhance the ranking system through machine learning–based chart analysis.
 
+At its core, ACubed provides tools to train, evaluate, and apply predictive models that estimate the difficulty of rhythm game charts based on note data, pattern structure, timing, and gameplay dynamics. By abstracting the stepfile format and separating model logic from game-specific implementations, ACubed is designed to be interoperable across rhythm games, enabling the creation of shared and consistent difficulty metrics across different rhythm games. This helps support transparent ranking systems, facilitates automated chart quality control, and enriches metadata for both players and developers.
+
+Whether you're enhancing a legacy engine or building the next generation of rhythm games, ACubed provides a modular and extensible foundation for intelligent difficulty estimation and cross-platform standardization.
+
+## Relevant Links
 - **Github repository**: <https://github.com/stepmanai/ACubed/>
 - **Documentation** <https://stepmanai.github.io/ACubed/>
 
@@ -24,99 +29,135 @@ Based on [Copier's installation requirements](https://github.com/copier-org/copi
 
 For Windows users, you can download `Ubuntu 22.04` from the Microsoft Store after setting up Windows Subsystem for Linux (WSL). Instructions provided [here](https://learn.microsoft.com/en-us/windows/wsl/install).
 
-> **Note**: The following instructions assume you have access to this repository. If you need to request access, please contact us.
-
 ## Getting Started with Your Project
 
-### 1. ✅ Setup SSH Keys in GitHub and Hugging Face
-
-Make sure you have a single SSH key configured for both platforms:
+### 1. Setup SSH Keys and Access Token in GitHub and Hugging Face
 
 <details>
-<summary>Click to expand SSH key setup steps</summary>
+‎<summary><h6>‎ ‎ ‎ ‎ Click to expand steps</h6></summary>
 
-```bash
-# Generate a new SSH key (if you don't have one)
-ssh-keygen -t ed25519 -C "your_email@example.com"
-
-# Add the key to your SSH agent
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519
-# Copy the public key to clipboard
-cat ~/.ssh/id_ed25519.pub
-
+#### a) Generate a new SSH key (if you don't have one)
+```console
+foo@bar:~$ ssh-keygen -t ed25519 -C "your_email@example.com"
+Your identification has been saved in /home/foo/.ssh/id_ed25519
+Your public key has been saved in /home/foo/.ssh/id_ed25519.pub
+The key fingerprint is:
+SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz1234567890abcdEFG your_email@example.com
+The key's randomart image is:
++--[ED25519 256]--+
+|     ..++o.      |
+|    ..oo+oo      |
+|    o.oo+o       |
+|   o ..+o        |
+|  . +.S          |
+|   o =           |
+|    E .          |
+|                 |
+|                 |
++----[SHA256]-----+
 ```
 
+#### b) Start the SSH agent and add the key.
+```console
+foo@bar:~$ eval "$(ssh-agent -s)"
+Agent pid 111
+foo@bar:~$ ssh-add ~/.ssh/id_ed25519
+Identity added: /home/foo/.ssh/id_ed25519 (your_email@example.com)
+```
+
+#### c) Copy the public key to clipboard.
+```console
+foo@bar:~$ cat ~/.ssh/id_ed25519.pub
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeDummyKeyForTestingPurposesOnly1234567890 your_email@example.com
+```
+
+#### d) Add public key to [GitHub](https://github.com/settings/keys) and [Hugging Face](https://huggingface.co/settings/keys).
+
+#### e) Verify SSH setup:
+
+```console
+foo@bar:~$ ssh -T git@github.com
+Hi foo! You've successfully authenticated, but GitHub does not provide shell access.
+foo@bar:~$ ssh -T git@hf.co
+Hi foo, welcome to Hugging Face.
+```
+
+#### f) [Create User Access Token](https://huggingface.co/settings/tokens) in Hugging Face.
 </details>
 
-- **GitHub:** [Add SSH Key](https://github.com/settings/keys)
 
-- **Hugging Face:** [Add SSH Key](https://huggingface.co/settings/keys)
+### 2. Setup Secrets to Access Rhythm Game Data
 
-You can verify SSH setup with:
+<details>
+<summary><h6>‎ ‎ ‎ ‎ Flash Flash Revolution (FFR)</h6></summary>
 
-```bash
-ssh -T git@github.com
-ssh -T git@hf.co
+#### a) Request API Key to access [FFR's API](https://www.flashflashrevolution.com/api/).
+</details>
+
+
+
+### 3. Clone the Repository to Your Local Environment via SSH
+
+```console
+foo@bar:~$ git clone git@github.com:stepmanai/ACubed.git
 ```
 
-### 2. Clone the Repository to Your Local Environment
+### 4. Install Required Local Dependencies in `ACubed` directory
 
-Begin by cloning the repository to a specific location on your local machine.
+<details>
+‎<summary><h6>‎ ‎ ‎ ‎ Click to expand steps</h6></summary>
 
-```bash
-git clone git@github.com:stepmanai/ACubed.git
-cd ACubed
+#### a) Install necessary Ubuntu packages via `apt` package manager.
+
+- `make`: Tool for building and compiling software using Makefiles.
+- `python3-pip`: Installs and manages Python 3 packages from the Python Package Index (PyPI).
+- `jq`: Command-line utility for parsing, filtering, and manipulating JSON data.
+- `git-lfs`: Git extension for versioning large files efficiently.
+
+```console
+foo@bar:~/ACubed$ sudo apt update
+foo@bar:~/ACubed$ sudo apt install -y make python3-pip jq git-lfs
 ```
 
-### 3. Install Required Local Dependencies
-
-Next, install the necessary dependencies by executing the following commands:
-
-> **Note**: You may skip some of these if they are already installed on your machine.
-
-```bash
-sudo apt update
-sudo apt install -y make python3-pip jq git-lfs
+#### b) Install `uv`.
+- `uv`: A fast Python package manager and build tool designed as a drop-in replacement for pip, pip-tools, and virtualenv.
+```console
+foo@bar:~/ACubed$ wget -qO- https://astral.sh/uv/install.sh | sh
+foo@bar:~/ACubed$ source $HOME/.local/bin/env
 ```
 
-### 4. Install `uv`
-
-```bash
-wget -qO- https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env
+#### c) Initialize `git lfs`.
+```console
+foo@bar:~/ACubed$ curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+foo@bar:~/ACubed$ git lfs install
 ```
+</details>
 
-### 5. Initialize `git lfs`
-
-```bash
-curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
-git lfs install
-```
-
-### 6. Set Up Your Development Environment
+### 7. Set Up Your Development Environment
 
 Finally, set up your development environment and install pre-commit hooks with:
 
-```bash
-make install
+```console
+foo@bar:~/ACubed$ make install
 ```
 
-### 7. Test pre-commit hooks
+### 8. Test pre-commit hooks
 
 Verify that the checks in the pre-commit hooks does not fail by running the following command:
 
-```bash
-uv run pre-commit run -a
+```console
+foo@bar:~/ACubed$ uv run pre-commit run -a
 ```
 
-### 8. Initialize Visual Studio Code
+### 9. Initialize Visual Studio Code
 
 Run the following command to open up a code editor:
 
-```bash
-code .
+```console
+foo@bar:~/ACubed$ code .
 ```
+
+### 10. Create `.env` file in Visual Studio Code using `.env.example`.
 
 You are now ready to start development on your project!
 
