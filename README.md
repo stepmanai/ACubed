@@ -92,6 +92,11 @@ Hi foo, welcome to Hugging Face.
 <summary><h6>‎ ‎ ‎ ‎ Flash Flash Revolution (FFR)</h6></summary>
 
 #### a) Request API Key to access [FFR's API](https://www.flashflashrevolution.com/api/).
+
+Make sure to log in [Flash Flash Revolution](https://www.flashflashrevolution.com/) before requesting for a User API Key.
+
+<img width="1778" height="488" alt="image" src="https://github.com/user-attachments/assets/4c6a6537-4e81-4117-9101-3ccb57804a34" />
+
 </details>
 
 
