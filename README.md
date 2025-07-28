@@ -107,6 +107,13 @@ Make sure to log in [Flash Flash Revolution](https://www.flashflashrevolution.co
 
 ```console
 foo@bar:~$ git clone git@github.com:stepmanai/ACubed.git
+Cloning into 'ACubed'...
+remote: Enumerating objects: 214, done.
+remote: Counting objects: 100% (214/214), done.
+remote: Compressing objects: 100% (146/146), done.
+remote: Total 214 (delta 62), reused 169 (delta 28), pack-reused 0 (from 0)
+Receiving objects: 100% (214/214), 323.97 KiB | 1.40 MiB/s, done.
+Resolving deltas: 100% (62/62), done.
 ```
 
 ### 4. Install Required Local Dependencies in `ACubed` directory
@@ -123,7 +130,14 @@ foo@bar:~$ git clone git@github.com:stepmanai/ACubed.git
 
 ```console
 foo@bar:~/ACubed$ sudo apt update
+...
+Fetched 39.3 MB in 17s (2282 kB/s)
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+110 packages can be upgraded. Run 'apt list --upgradable' to see them.
 foo@bar:~/ACubed$ sudo apt install -y make python3-pip jq git-lfs
+...
 ```
 
 #### b) Install `uv`.
@@ -132,6 +146,12 @@ foo@bar:~/ACubed$ sudo apt install -y make python3-pip jq git-lfs
 
 ```console
 foo@bar:~/ACubed$ wget -qO- https://astral.sh/uv/install.sh | sh
+downloading uv 0.8.3 x86_64-unknown-linux-gnu
+no checksums to verify
+installing to /home/foo/.local/bin
+  uv
+  uvx
+everything's installed!
 foo@bar:~/ACubed$ source $HOME/.local/bin/env
 ```
 
@@ -139,36 +159,60 @@ foo@bar:~/ACubed$ source $HOME/.local/bin/env
 
 ```console
 foo@bar:~/ACubed$ curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+...
+The repository is setup! You can now install packages.
 foo@bar:~/ACubed$ git lfs install
+Updated git hooks.
+Git LFS initialized.
 ```
 
 </details>
 
-### 7. Set Up Your Development Environment
+### 5. Set Up Your Development Environment
 
-Finally, set up your development environment and install pre-commit hooks with:
+<details>
+‎<summary><h6>‎ ‎ ‎ ‎ Click to expand steps</h6></summary>
 
+#### a) Run `make` command to create virual environment.
+    
 ```console
 foo@bar:~/ACubed$ make install
+🚀 Creating virtual environment using uv
+Using CPython 3.10.12 interpreter at: /usr/bin/python3
+Creating virtual environment at: .venv
+...
 ```
 
-### 8. Test pre-commit hooks
+#### b) Test pre-commit hooks
 
 Verify that the checks in the pre-commit hooks does not fail by running the following command:
 
 ```console
 foo@bar:~/ACubed$ uv run pre-commit run -a
+Sync Git submodules......................................................Passed
+check for case conflicts.................................................Passed
+check for merge conflicts................................................Passed
+check toml...............................................................Passed
+check yaml...............................................................Passed
+fix end of files.........................................................Passed
+trim trailing whitespace.................................................Passed
+ruff.....................................................................Passed
+ruff-format..............................................................Passed
+prettier.................................................................Passed
 ```
 
-### 9. Initialize Visual Studio Code
+#### c) Initialize Visual Studio Code
 
 Run the following command to open up a code editor:
 
 ```console
 foo@bar:~/ACubed$ code .
+...
 ```
 
-### 10. Create `.env` file in Visual Studio Code using `.env.example`.
+#### d) Create `.env` file in Visual Studio Code using `.env.example`.
+
+</details>
 
 You are now ready to start development on your project!
 
