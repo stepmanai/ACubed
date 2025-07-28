@@ -11,11 +11,7 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/stepmanai/ACubed)](https://img.shields.io/github/commit-activity/m/stepmanai/ACubed)
 [![License](https://img.shields.io/github/license/stepmanai/ACubed)](https://img.shields.io/github/license/stepmanai/ACubed)
 
-**ACubed** is a model training framework designed to bring data-driven stepfile difficulty prediction to open source rhythm games. Inspired by the spirit of [rCubed](https://github.com/flashflashrevolution/rCubed), a transformative upgrade to the Flash Flash Revolution (FFR) game engine, ACubed aims to modernize and enhance the ranking system through machine learning–based chart analysis.
-
-At its core, ACubed provides tools to train, evaluate, and apply predictive models that estimate the difficulty of rhythm game charts based on note data, pattern structure, timing, and gameplay dynamics. By abstracting the stepfile format and separating model logic from game-specific implementations, ACubed is designed to be interoperable across rhythm games, enabling the creation of shared and consistent difficulty metrics across different rhythm games. This helps support transparent ranking systems, facilitates automated chart quality control, and enriches metadata for both players and developers.
-
-Whether you're enhancing a legacy engine or building the next generation of rhythm games, ACubed provides a modular and extensible foundation for intelligent difficulty estimation and cross-platform standardization.
+**ACubed** is a model training framework that enables data-driven stepfile difficulty prediction for open-source rhythm games. Its interoperable design allows standardized difficulty metrics and predictive models to be used across different games. This enhances transparency in player ranking systems and ensures fairer placements in official tournaments.
 
 ## Relevant Links
 
