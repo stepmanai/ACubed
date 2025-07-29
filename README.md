@@ -174,7 +174,7 @@ Git LFS initialized.
 ‎<summary><h6>‎ ‎ ‎ ‎ Click to expand steps</h6></summary>
 
 #### a) Run `make` command to create virual environment.
-    
+
 ```console
 foo@bar:~/ACubed$ make install
 🚀 Creating virtual environment using uv

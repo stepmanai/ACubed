@@ -10,10 +10,10 @@ install: ## Install the virtual environment, pull submodules, and install the pr
 .PHONY: ffr-charts
 ffr-charts: ## Upload FFR charts to HuggingFace Datasets repo (TODO: need to restrict this to certain roles in GitHub)
 	@echo "🚀 Downloading dataset from Flash Flash Revolution's API..."
-	@uv run python huggingface/datasets/ffr/charts/download_ffr_charts.py
+	@uv run python datasets/ffr/charts/download_ffr_charts.py
 	@uv run scripts/update_huggingface.py \
 		--repo-id stepmanai/ffr_charts \
-		--folder huggingface/datasets/ffr/charts \
+		--folder datasets/ffr/charts \
 		--repo-type dataset
 
 .PHONY: clean
