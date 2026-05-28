@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from acubed.engine.ruleset import Ruleset
+from acubed.engine.objective import Objective
 
 
 class Game(StrEnum):
@@ -25,6 +25,6 @@ class GameMetadata:
 
     timing_resolution_ms: int
 
-    ruleset: Ruleset
+    objective: Objective
 
     default_database: str
