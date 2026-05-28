@@ -4,7 +4,6 @@ from acubed.engine.judge import JudgeTier
 from acubed.engine.objective import Objective
 from acubed.engine.ruleset import Ruleset
 
-
 FFR_OBJECTIVE = Objective(
     name="ffr_default",
     judge_tiers=(

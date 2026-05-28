@@ -15,3 +15,24 @@ A machine learning training framework built on Databricks with FastAPI serving f
 
 - **Github repository**: <https://github.com/stepmanai/ACubed/>
 - **Documentation** <https://stepmanai.github.io/ACubed/>
+
+
+## Setup
+
+Install uv:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Create environment + install dependencies:
+
+```bash
+uv sync
+```
+
+Run pipeline:
+
+```bash
+uv run python main.py
+```

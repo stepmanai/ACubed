@@ -1,7 +1,6 @@
 # config/runtime.py
 
 import os
-
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
@@ -13,10 +12,7 @@ load_dotenv()
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
-
-    base_api_url: str = (
-        "https://www.flashflashrevolution.com/api/api.php"
-    )
+    base_api_url: str = "https://www.flashflashrevolution.com/api/api.php"
 
     playlist_url: str = (
         "https://www.flashflashrevolution.com/game/r3/r3-playlist.php"

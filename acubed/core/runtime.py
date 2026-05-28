@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from acubed.models.environment import (
     Environment,
 )
-
 from acubed.models.game import Game
 
 

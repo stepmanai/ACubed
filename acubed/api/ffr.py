@@ -1,12 +1,12 @@
 # api.py
 
-import requests
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import requests
+
 
 class FFRClient:
-
     def __init__(
         self,
         api_key,
@@ -14,7 +14,7 @@ class FFRClient:
         playlist_url,
         timeout=10,
         retries=5,
-        thread_pool_size=4
+        thread_pool_size=4,
     ):
         self.api_key = api_key
         self.base_api_url = base_api_url
@@ -28,11 +28,8 @@ class FFRClient:
     def fetch_songlist(self):
         response = self.session.get(
             self.base_api_url,
-            params={
-                "key": self.api_key,
-                "action": "songlist"
-            },
-            timeout=self.timeout
+            params={"key": self.api_key, "action": "songlist"},
+            timeout=self.timeout,
         )
 
         response.raise_for_status()
@@ -49,10 +46,7 @@ class FFRClient:
 
         for attempt in range(self.retries):
             try:
-                response = self.session.get(
-                    url,
-                    timeout=self.timeout
-                )
+                response = self.session.get(url, timeout=self.timeout)
 
                 response.raise_for_status()
 
@@ -61,41 +55,26 @@ class FFRClient:
                 return {
                     "song_id": song_id,
                     "info": payload.get("info"),
-                    "chart": payload.get("chart")
+                    "chart": payload.get("chart"),
                 }
 
             except Exception:
                 if attempt == self.retries - 1:
                     return None
 
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
     def fetch_charts_parallel(self, song_ids):
-        with ThreadPoolExecutor(
-            max_workers=self.thread_pool_size
-        ) as executor:
+        with ThreadPoolExecutor(max_workers=self.thread_pool_size) as executor:
+            results = list(executor.map(self.fetch_chart, song_ids))
 
-            results = list(
-                executor.map(
-                    self.fetch_chart,
-                    song_ids
-                )
-            )
-
-        return [
-            r for r in results
-            if r is not None
-        ]
+        return [r for r in results if r is not None]
 
     def fetch_playlist(self):
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
 
         response = self.session.get(
-            self.playlist_url,
-            headers=headers,
-            timeout=self.timeout
+            self.playlist_url, headers=headers, timeout=self.timeout
         )
 
         response.raise_for_status()

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from acubed.models.game import Game
 from acubed.models.registry import GAME_METADATA
 
-
 DEFAULT_GAME = Game.FFR
 
 

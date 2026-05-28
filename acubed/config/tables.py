@@ -19,13 +19,7 @@ def build_table_config(
     schema = game.value
 
     return TableConfig(
-        songlist=(
-            f"{catalog}.{schema}.bronze__songlist"
-        ),
-        charts=(
-            f"{catalog}.{schema}.bronze__charts"
-        ),
-        playlist=(
-            f"{catalog}.{schema}.bronze__playlist"
-        ),
+        songlist=(f"{catalog}.{schema}.bronze__songlist"),
+        charts=(f"{catalog}.{schema}.bronze__charts"),
+        playlist=(f"{catalog}.{schema}.bronze__playlist"),
     )

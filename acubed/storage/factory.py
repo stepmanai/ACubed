@@ -3,13 +3,11 @@
 from acubed.core.runtime import (
     RuntimeContext,
 )
-
-from acubed.models.registry import (
-    GAME_METADATA,
-)
-
 from acubed.models.environment import (
     Environment,
+)
+from acubed.models.registry import (
+    GAME_METADATA,
 )
 
 
@@ -17,23 +15,14 @@ def build_storage(
     context: RuntimeContext,
     config,
 ):
-    metadata = GAME_METADATA[
-        context.game
-    ]
+    metadata = GAME_METADATA[context.game]
 
-    if (
-        context.environment
-        == Environment.LOCAL
-    ):
+    if context.environment == Environment.LOCAL:
         from acubed.storage.duckdb import (
             DuckDBStorage,
         )
 
-        return DuckDBStorage(
-            database_path=(
-                metadata.default_database
-            )
-        )
+        return DuckDBStorage(database_path=(metadata.default_database))
 
     if context.environment in {
         Environment.DATABRICKS,
@@ -47,10 +36,7 @@ def build_storage(
             DatabricksStorage,
         )
 
-        spark = (
-            SparkSession.builder
-            .getOrCreate()
-        )
+        spark = SparkSession.builder.getOrCreate()
 
         return DatabricksStorage(
             spark=spark,
@@ -58,8 +44,8 @@ def build_storage(
         )
 
     raise ValueError(
-        f'''
+        f"""
         Unsupported environment:
         {context.environment}
-        '''
+        """
     )

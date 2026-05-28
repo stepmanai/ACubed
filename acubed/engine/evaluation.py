@@ -3,7 +3,6 @@
 from acubed.engine.scoring import score_hit
 
 
-
 def evaluate_offsets(offsets, objective):
     results = []
 

@@ -17,12 +17,7 @@ def detect_environment() -> Environment:
     if not runtime_version:
         return Environment.LOCAL
 
-    if runtime_version.startswith(
-        "client."
-    ):
-        return (
-            Environment
-            .DATABRICKS_SERVERLESS
-        )
+    if runtime_version.startswith("client."):
+        return Environment.DATABRICKS_SERVERLESS
 
     return Environment.DATABRICKS

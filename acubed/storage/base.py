@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 
 
 class BaseStorage(ABC):
-
     @abstractmethod
     def table_exists(
         self,

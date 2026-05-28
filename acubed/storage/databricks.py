@@ -2,14 +2,12 @@
 
 from delta.tables import DeltaTable
 
-from acubed.storage.base import BaseStorage
-
 from acubed.models.game import Game
 from acubed.models.registry import GAME_METADATA
+from acubed.storage.base import BaseStorage
 
 
 class DatabricksStorage(BaseStorage):
-
     def __init__(
         self,
         spark,
@@ -19,17 +17,13 @@ class DatabricksStorage(BaseStorage):
 
         metadata = GAME_METADATA[game]
 
-        self.catalog = (
-            metadata.default_catalog
-        )
+        self.catalog = metadata.default_catalog
 
         self.schema = game.value
 
     @property
     def namespace(self):
-        return (
-            f"{self.catalog}.{self.schema}"
-        )
+        return f"{self.catalog}.{self.schema}"
 
     def _get_qualified_name(self, table_name):
         parts = table_name.split(".")
@@ -39,15 +33,13 @@ class DatabricksStorage(BaseStorage):
             return f"{self.namespace}.{table_name}"
 
     def _ensure_spark_dataframe(self, dataframe):
-        if hasattr(dataframe, 'write'):
+        if hasattr(dataframe, "write"):
             return dataframe
         else:
             return self.spark.createDataFrame(dataframe)
 
     def qualify(self, table_name):
-        return (
-            f"{self.namespace}.{table_name}"
-        )
+        return f"{self.namespace}.{table_name}"
 
     def table_exists(self, table_name: str) -> bool:
         qualified = self._get_qualified_name(table_name)
@@ -65,8 +57,7 @@ class DatabricksStorage(BaseStorage):
         qualified = self._get_qualified_name(table_name)
         spark_df = self._ensure_spark_dataframe(dataframe)
         (
-            spark_df.write
-            .format("delta")
+            spark_df.write.format("delta")
             .mode("overwrite")
             .option(
                 "overwriteSchema",
@@ -84,18 +75,13 @@ class DatabricksStorage(BaseStorage):
         qualified = self._get_qualified_name(table_name)
         spark_df = self._ensure_spark_dataframe(dataframe)
 
-        delta_table = (
-            DeltaTable.forName(
-                self.spark,
-                qualified,
-            )
+        delta_table = DeltaTable.forName(
+            self.spark,
+            qualified,
         )
 
         condition = " AND ".join(
-            [
-                f"target.{c} = source.{c}"
-                for c in key_columns
-            ]
+            [f"target.{c} = source.{c}" for c in key_columns]
         )
 
         (

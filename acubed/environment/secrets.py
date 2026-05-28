@@ -12,30 +12,21 @@ def get_api_key(
 ) -> str:
 
     if environment == Environment.LOCAL:
-
-        api_key = os.getenv(
-            "FFR_API_KEY"
-        )
+        api_key = os.getenv("FFR_API_KEY")
 
         if not api_key:
-            raise ValueError(
-                "FFR_API_KEY environment variable not found"
-            )
+            raise ValueError("FFR_API_KEY environment variable not found")
 
         return api_key
-
-    from pyspark.sql import (
-        SparkSession,
-    )
 
     from pyspark.dbutils import (
         DBUtils,
     )
-
-    spark = (
-        SparkSession.builder
-        .getOrCreate()
+    from pyspark.sql import (
+        SparkSession,
     )
+
+    spark = SparkSession.builder.getOrCreate()
 
     dbutils = DBUtils(spark)
 

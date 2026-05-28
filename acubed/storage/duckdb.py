@@ -6,14 +6,11 @@ from acubed.storage.base import BaseStorage
 
 
 class DuckDBStorage(BaseStorage):
-
     def __init__(
         self,
         database_path: str,
     ):
-        self.con = duckdb.connect(
-            database=database_path
-        )
+        self.con = duckdb.connect(database=database_path)
 
     def _normalize_table_name(
         self,
@@ -46,9 +43,7 @@ class DuckDBStorage(BaseStorage):
         self,
         table_name,
     ):
-        table_name = self._normalize_table_name(
-            table_name
-        )
+        table_name = self._normalize_table_name(table_name)
 
         parts = table_name.split(".")
 
@@ -59,12 +54,12 @@ class DuckDBStorage(BaseStorage):
             table = table_name
 
         result = self.con.execute(
-            f'''
+            f"""
             SELECT COUNT(*)
             FROM information_schema.tables
             WHERE table_schema = '{schema}'
             AND table_name = '{table}'
-            '''
+            """
         ).fetchone()
 
         return result[0] > 0
@@ -73,9 +68,7 @@ class DuckDBStorage(BaseStorage):
         self,
         table_name,
     ):
-        table_name = self._normalize_table_name(
-            table_name
-        )
+        table_name = self._normalize_table_name(table_name)
 
         return self.con.table(table_name)
 
@@ -84,18 +77,16 @@ class DuckDBStorage(BaseStorage):
         table_name,
         dataframe,
     ):
-        table_name = self._normalize_table_name(
-            table_name
-        )
+        table_name = self._normalize_table_name(table_name)
 
         self.con.sql(
-            f'''
+            f"""
             CREATE OR REPLACE TABLE
             {table_name}
             AS
             SELECT *
             FROM dataframe
-            '''
+            """
         )
 
     def upsert_table(
@@ -104,39 +95,34 @@ class DuckDBStorage(BaseStorage):
         dataframe,
         key_columns,
     ):
-        table_name = self._normalize_table_name(
-            table_name
-        )
+        table_name = self._normalize_table_name(table_name)
 
         self.con.sql(
-            '''
+            """
             CREATE OR REPLACE TEMP TABLE
             temp_upsert
             AS
             SELECT *
             FROM dataframe
-            '''
+            """
         )
 
         delete_condition = " AND ".join(
-            [
-                f"{table_name}.{col} = temp_upsert.{col}"
-                for col in key_columns
-            ]
+            [f"{table_name}.{col} = temp_upsert.{col}" for col in key_columns]
         )
 
         self.con.sql(
-            f'''
+            f"""
             DELETE FROM {table_name}
             USING temp_upsert
             WHERE {delete_condition}
-            '''
+            """
         )
 
         self.con.sql(
-            f'''
+            f"""
             INSERT INTO {table_name}
             SELECT *
             FROM temp_upsert
-            '''
+            """
         )

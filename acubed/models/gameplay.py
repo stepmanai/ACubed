@@ -4,10 +4,7 @@ from dataclasses import (
     dataclass,
     field,
 )
-
 from enum import IntEnum
-
-from typing import Optional
 
 
 class Orientation(IntEnum):
@@ -28,9 +25,7 @@ class Note:
 
 @dataclass(slots=True)
 class Stepfile:
-    notes: list[Note] = field(
-        default_factory=list
-    )
+    notes: list[Note] = field(default_factory=list)
 
     difficulty: float = 0.0
 
