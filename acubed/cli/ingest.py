@@ -10,6 +10,9 @@ from acubed.config.tables import (
 from acubed.core.runtime import (
     RuntimeContext,
 )
+from acubed.dataframe.factory import (
+    build_dataframe_factory,
+)
 from acubed.environment.detection import (
     detect_environment,
 )
@@ -60,6 +63,8 @@ def main():
         config=config,
     )
 
+    dataframe_factory = build_dataframe_factory(environment)
+
     table_config = build_table_config(
         game=context.game,
         catalog="acubed",
@@ -70,6 +75,7 @@ def main():
         api_client=api_client,
         table_config=table_config,
         logger=logger,
+        dataframe_factory=(dataframe_factory),
     )
 
     changed_ids = service.sync_songlist()

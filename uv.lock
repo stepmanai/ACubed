@@ -18,6 +18,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dotenv" },
     { name = "duckdb" },
+    { name = "narwhals" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "requests" },
@@ -33,6 +34,7 @@ dev = [
 requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "duckdb", specifier = ">=1.3.0" },
+    { name = "narwhals", specifier = ">=2.21.2" },
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "requests", specifier = ">=2.32.0" },
 ]
@@ -247,6 +249,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730", size = 20503, upload-time = "2025-10-18T21:55:43.219Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
+]
+
+[[package]]
+name = "narwhals"
+version = "2.21.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/a0/6198c56d42ef2f3c6ed0c42ba30dbcefdc86a91262d7d449010770ae085b/narwhals-2.21.2.tar.gz", hash = "sha256:5c5b2d0b47aef7c73ea412cfcbcd467f2f2d5be73e3c2ab19d78f4a97718790a", size = 632176, upload-time = "2026-05-16T08:49:08.314Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/77/928ea2e70641ca177a11140062cc5840d421795f2e82749d408d0cce900a/narwhals-2.21.2-py3-none-any.whl", hash = "sha256:7bb57c3700486039215455b9bf2d64261915cc0fd845cc30272d631df696b251", size = 451201, upload-time = "2026-05-16T08:49:05.536Z" },
 ]
 
 [[package]]
