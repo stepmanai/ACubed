@@ -30,7 +30,7 @@ class IngestionService:
 
             return df["id"].tolist()
 
-        previous = self.storage.read_table(self.table_config.songlist).df()
+        previous = self.storage.read_table(self.table_config.songlist).toPandas()
 
         changed = pd.merge(
             previous, df, on="id", suffixes=("_old", "_new"), how="inner"
