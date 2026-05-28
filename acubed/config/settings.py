@@ -32,9 +32,8 @@ def build_duckdb_settings(
 def build_databricks_settings(
     game: Game = DEFAULT_GAME,
 ) -> DatabricksSettings:
-    metadata = GAME_METADATA[game]
 
     return DatabricksSettings(
-        catalog=metadata.default_catalog,
+        catalog="acubed",
         schema=game.value,
     )

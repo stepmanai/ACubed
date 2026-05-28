@@ -3,7 +3,6 @@
 from delta.tables import DeltaTable
 
 from acubed.models.game import Game
-from acubed.models.registry import GAME_METADATA
 from acubed.storage.base import BaseStorage
 
 
@@ -15,9 +14,7 @@ class DatabricksStorage(BaseStorage):
     ):
         self.spark = spark
 
-        metadata = GAME_METADATA[game]
-
-        self.catalog = metadata.default_catalog
+        self.catalog = "acubed"
 
         self.schema = game.value
 
@@ -37,9 +34,6 @@ class DatabricksStorage(BaseStorage):
             return dataframe
         else:
             return self.spark.createDataFrame(dataframe)
-
-    def qualify(self, table_name):
-        return f"{self.namespace}.{table_name}"
 
     def table_exists(self, table_name: str) -> bool:
         qualified = self._get_qualified_name(table_name)

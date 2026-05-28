@@ -11,8 +11,8 @@ class Note:
     timestamp_ms: float
 
 
-@dataclass(frozen=True, slots=True)
-class HitEvent:
-    player_id: str
-    note_id: int
-    offset_ms: float
+# @dataclass(frozen=True, slots=True)
+# class HitEvent:
+#     player_id: str
+#     note_id: int
+#     offset_ms: float
