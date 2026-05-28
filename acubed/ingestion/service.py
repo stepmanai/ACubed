@@ -18,13 +18,51 @@ class IngestionService:
         self.logger = logger
         self.dataframe_factory = dataframe_factory
 
-    def _frame(self, data):
-        native = self.dataframe_factory(data)
+    def _normalize_numeric_types(self, data):
 
-        return nw.from_native(
-            native,
-            eager_only=True,
-        )
+        if not data or not isinstance(data, list):
+            return data
+
+        columns_with_numbers = {}
+        for row in data:
+            for key, value in row.items():
+                if isinstance(value, (int, float)) and value is not None:
+                    if key not in columns_with_numbers:
+                        columns_with_numbers[key] = {
+                            "has_int": False,
+                            "has_float": False,
+                        }
+                    if isinstance(value, float):
+                        columns_with_numbers[key]["has_float"] = True
+                    elif isinstance(value, int):
+                        columns_with_numbers[key]["has_int"] = True
+
+        mixed_columns = {
+            col
+            for col, types in columns_with_numbers.items()
+            if types["has_int"] and types["has_float"]
+        }
+
+        if not mixed_columns:
+            return data
+
+        normalized_data = []
+        for row in data:
+            normalized_row = row.copy()
+            for col in mixed_columns:
+                if col in normalized_row and isinstance(
+                    normalized_row[col], int
+                ):
+                    normalized_row[col] = float(normalized_row[col])
+            normalized_data.append(normalized_row)
+
+        return normalized_data
+
+    def _frame(self, data):
+        normalized_data = self._normalize_numeric_types(data)
+        native = self.dataframe_factory(normalized_data)
+
+        return nw.from_native(native)
 
     def _native_to_frame(
         self,
@@ -33,10 +71,7 @@ class IngestionService:
         if hasattr(native, "df"):
             native = native.df()
 
-        return nw.from_native(
-            native,
-            eager_only=True,
-        )
+        return nw.from_native(native)
 
     def _column_to_list(
         self,
@@ -45,16 +80,17 @@ class IngestionService:
     ):
         native = frame.select(column).to_native()
 
-        # pandas
         if hasattr(native, "__getitem__"):
             try:
                 return native[column].tolist()
             except Exception:
                 pass
 
-        # polars
         if hasattr(native, "to_dicts"):
             return [row[column] for row in native.to_dicts()]
+
+        if hasattr(native, "collect"):
+            return [row[0] for row in native.collect()]
 
         raise TypeError(f"Unsupported dataframe type: {type(native)}")
 
@@ -64,15 +100,12 @@ class IngestionService:
     ):
         native = frame.select(nw.len()).to_native()
 
-        # pandas
         if hasattr(native, "iloc"):
             return native.iloc[0, 0]
 
-        # polars
         if hasattr(native, "to_dicts"):
             return native.to_dicts()[0].get("len", 0)
 
-        # spark
         if hasattr(native, "collect"):
             return native.collect()[0][0]
 

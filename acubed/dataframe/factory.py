@@ -14,7 +14,7 @@ def build_dataframe_factory(
 
     if environment in {
         "databricks",
-        "databricks-serverless",
+        "databricks_serverless",
     }:
         from pyspark.sql import (
             SparkSession,

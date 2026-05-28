@@ -34,7 +34,3 @@ class BaseStorage(ABC):
         key_columns: list[str],
     ):
         pass
-
-    # @abstractmethod
-    # def delete_where_in(self, table_name: str, column: str, values: list):
-    #     pass
