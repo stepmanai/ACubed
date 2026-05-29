@@ -1,8 +1,8 @@
 # storage/databricks.py
 
+from acubed.models.game import Game
 from delta.tables import DeltaTable
 
-from acubed.models.game import Game
 from acubed.storage.base import BaseStorage
 
 

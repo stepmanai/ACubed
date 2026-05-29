@@ -1,16 +1,22 @@
 # config/runtime.py
 
 import os
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+)
 
+from acubed.models.game import (
+    Game,
+)
 from dotenv import load_dotenv
-
-from acubed.models.game import Game
 
 load_dotenv()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class RuntimeConfig:
     base_api_url: str = "https://www.flashflashrevolution.com/api/api.php"
 
@@ -37,11 +43,6 @@ class RuntimeConfig:
             "MAX_RETRIES",
             5,
         )
-    )
-
-    local_db_path: str = os.getenv(
-        "LOCAL_DB_PATH",
-        "acubed.duckdb",
     )
 
     game: Game = Game.FFR

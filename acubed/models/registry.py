@@ -1,6 +1,6 @@
 # models/registry.py
 
-from acubed.config.runtime import config
+from acubed.config.paths import DUCKDB_PATH
 from acubed.engine.objectives.ffr import (
     FFR_OBJECTIVE,
 )
@@ -18,6 +18,6 @@ GAME_METADATA = {
         supports_mines=False,
         timing_resolution_ms=1,
         objective=FFR_OBJECTIVE,
-        default_database=config.local_db_path,
+        default_database=DUCKDB_PATH,
     ),
 }
