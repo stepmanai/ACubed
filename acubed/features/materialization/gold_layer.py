@@ -1,4 +1,4 @@
-# features/materialization/gold_features.py
+# features/materialization/gold_layer.py
 
 import polars as pl
 

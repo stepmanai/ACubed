@@ -1,0 +1,47 @@
+# features/materialization/silver_layer.py
+
+import narwhals as nw
+
+
+def build_silver_events(
+    bronze_df: nw.LazyFrame,
+) -> nw.LazyFrame:
+
+    silver_events_df = (
+        bronze_df.explode("chart")
+        .with_columns(
+            song_name=nw.col("info").struct.field("name"),
+            framer=nw.col("chart").list.get(0),
+            lane=nw.col("chart").list.get(1),
+            color=nw.col("chart").list.get(2),
+            time=nw.col("chart").list.get(3),
+        )
+        .with_columns(
+            note_id=nw.col("song_id")
+            .cum_count()
+            .over("song_id", order_by="time")
+        )
+        .drop("chart", "info")
+    )
+
+    return silver_events_df
+
+
+def build_silver_songs(
+    bronze_df: nw.LazyFrame,
+) -> nw.LazyFrame:
+
+    silver_songs_df = (
+        bronze_df.with_columns(
+            song_id=nw.col("level"),
+        )
+        .select(
+            "song_id",
+            "name",
+            "difficulty",
+            "previewhash",
+        )
+        .sort("song_id")
+    )
+
+    return silver_songs_df
