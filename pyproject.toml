@@ -15,7 +15,7 @@ dependencies = [
 
 [project.scripts]
 ingest = "acubed.cli.ingest:main"
-train = "acubed.cli.train:main"
+features = "acubed.cli.features:main"
 
 [dependency-groups]
 dev = [
