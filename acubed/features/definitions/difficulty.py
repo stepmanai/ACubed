@@ -2,30 +2,19 @@
 
 from dataclasses import dataclass
 
-from features.expressions.aggregations import (
-    Avg,
-    StdDev,
-)
-from features.expressions.base import Column
 
+@dataclass(frozen=True, slots=True)
+class DifficultyFeatures:
+    chart_id: int
 
-@dataclass(frozen=True)
-class FeatureDefinition:
-    name: str
-    expr: object
+    note_count: int
 
+    duration_ms: float
 
-AVG_OFFSET = FeatureDefinition(
-    name="avg_hit_offset",
-    expr=Avg(Column("hit_offset_ms")),
-)
+    notes_per_second: float
 
-TIMING_VARIANCE = FeatureDefinition(
-    name="timing_variance",
-    expr=StdDev(Column("hit_offset_ms")),
-)
+    peak_nps: float
 
-DIFFICULTY_FEATURES = [
-    AVG_OFFSET,
-    TIMING_VARIANCE,
-]
+    jack_density: float
+
+    stream_density: float

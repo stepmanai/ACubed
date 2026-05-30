@@ -10,6 +10,8 @@ class TableConfig:
     songlist: str
     charts: str
     playlist: str
+    silver_events: str
+    gold_features: str
 
 
 def build_table_config(
@@ -22,4 +24,6 @@ def build_table_config(
         songlist=(f"{catalog}.{schema}.bronze__songlist"),
         charts=(f"{catalog}.{schema}.bronze__charts"),
         playlist=(f"{catalog}.{schema}.bronze__playlist"),
+        silver_events=(f"{catalog}.{schema}.silver__events"),
+        gold_features=(f"{catalog}.{schema}.gold__features"),
     )
