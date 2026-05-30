@@ -19,18 +19,6 @@ def main():
 
     executor.materialize()
 
-    train_df = app.storage.read_table(
-        app.tables.silver_events,
-    )
-
-    print(train_df)
-
-    _train_df = app.storage.read_table(
-        app.tables.silver_songs,
-    )
-
-    print(_train_df)
-
 
 if __name__ == "__main__":
     main()
