@@ -1,44 +1,18 @@
-# # features/materialization/gold_layer.py
+# features/materialization/gold_layer.py
 
-# import polars as pl
+import narwhals as nw
 
-# from acubed.features.adapters.charts import (
-#     chart_to_stepfile,
-# )
-# from acubed.features.executors.runtime import (
-#     build_features,
-# )
+from acubed.core.runtime import RuntimeContext
 
 
-# def build_gold_features(
-#     bronze_df: pl.DataFrame,
-# ) -> pl.DataFrame:
+def build_gold_note_features(
+    context: RuntimeContext,
+    silver_events_df: nw.LazyFrame,
+) -> nw.LazyFrame:
 
-#     rows = []
+    gold_note_features_df = silver_events_df
 
-#     for row in bronze_df.iter_rows(named=True):
-#         info = row["info"]
+    print(context)
+    print(gold_note_features_df)
 
-#         difficulty = (
-#             float(info.get("difficulty", 0))
-#             if isinstance(info, dict) else 0.0
-#         )
-
-#         stepfile = chart_to_stepfile(
-#             row["chart"],
-#             difficulty=difficulty,
-#         )
-
-#         features = build_features(
-#             chart_id=row["song_id"],
-#             stepfile=stepfile,
-#         )
-
-#         rows.append(
-#             {
-#                 **features.__dict__,
-#                 "difficulty": difficulty,
-#             }
-#         )
-
-#     return pl.DataFrame(rows)
+    return gold_note_features_df

@@ -1,21 +1,26 @@
 # features/adapters/charts/factory.py
 
-from acubed.models.gameplay import (
-    Stepfile,
-)
+from acubed.core.runtime import RuntimeContext
+from acubed.models.game import Game
+from acubed.models.gameplay import Stepfile
 
 from .ffr import ffr_to_stepfile
-from .sm import sm_to_stepfile
+
+_ADAPTERS = {
+    Game.FFR: ffr_to_stepfile,
+    # Game.ETTERNA: sm_to_stepfile,
+    # Game.QUAVER: qua_to_stepfile,
+    # Game.OSUMANIA: osu_to_stepfile,
+}
 
 
-# TODO: RESOLVE THIS FACTORY.
-def chart_to_stepfile(chart, game: str) -> Stepfile:
-    match game:
-        case "ffr":
-            return ffr_to_stepfile(chart)
+def chart_to_stepfile(
+    context: RuntimeContext,
+    chart,
+) -> Stepfile:
+    try:
+        adapter = _ADAPTERS[context.game]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported game: {context.game}") from exc
 
-        case "etterna":
-            return sm_to_stepfile(chart)
-
-        case _:
-            raise ValueError(f"Unsupported game: {game}")
+    return adapter(chart)

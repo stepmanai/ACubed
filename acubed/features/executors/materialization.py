@@ -1,10 +1,9 @@
 import narwhals as nw
 
 from acubed.config.tables import TableConfig
-
-# from acubed.features.materialization.gold_layer import (
-#     build_gold_features,
-# )
+from acubed.features.materialization.gold_layer import (
+    build_gold_note_features,
+)
 from acubed.features.materialization.silver_layer import (
     build_silver_events,
     build_silver_songs,
@@ -44,21 +43,26 @@ class FeatureExecutor:
             silver_songs_df,
         )
 
-    # def materialize_gold(self):
+    def materialize_gold(self):
 
-    #     bronze_df = self.storage.read_table(self.tables.charts)
+        silver_events_df = self.storage.read_table(self.tables.silver_events)
+        silver_songs_df = self.storage.read_table(self.tables.silver_songs)
 
-    #     gold_df = nw.to_native(
-    #         build_gold_features(nw.from_native(bronze_df))
-    #     )
+        gold_note_features_df = nw.to_native(
+            build_gold_note_features(
+                self.context, nw.from_native(silver_events_df)
+            )
+        )
 
-    #     self.storage.overwrite_table(
-    #         self.tables.gold_features,
-    #         gold_df,
-    #     )
+        # print(gold_note_features_df)
+
+        # self.storage.overwrite_table(
+        #     self.tables.gold_features,
+        #     gold_features_df,
+        # )
 
     def materialize(self):
 
         self.materialize_silver()
 
-        # self.materialize_gold()
+        self.materialize_gold()
