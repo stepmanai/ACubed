@@ -1,6 +1,7 @@
 import narwhals as nw
 
 from acubed.config.tables import TableConfig
+from acubed.core.runtime import RuntimeContext
 from acubed.features.materialization.gold_layer import (
     build_gold_note_features,
 )
@@ -14,9 +15,11 @@ from acubed.storage.base import BaseStorage
 class FeatureExecutor:
     def __init__(
         self,
+        context: RuntimeContext,
         storage: BaseStorage,
         tables: TableConfig,
     ):
+        self.context = context
         self.storage = storage
         self.tables = tables
 
@@ -49,9 +52,7 @@ class FeatureExecutor:
         silver_songs_df = self.storage.read_table(self.tables.silver_songs)
 
         gold_note_features_df = nw.to_native(
-            build_gold_note_features(
-                self.context, nw.from_native(silver_events_df)
-            )
+            build_gold_note_features(nw.from_native(silver_events_df))
         )
 
         # print(gold_note_features_df)

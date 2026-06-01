@@ -13,6 +13,7 @@ def main():
     app = ApplicationContext()
 
     executor = FeatureExecutor(
+        context=app.runtime,
         storage=app.storage,
         tables=app.tables,
     )
