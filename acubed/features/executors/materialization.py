@@ -46,7 +46,7 @@ class FeatureExecutor:
         )
 
         gold_note_features_df = nw.from_dicts(
-            build_gold_note_features(event_rows), backend="polars"
+            build_gold_note_features(event_rows), backend="pandas"
         )
 
         self.storage.overwrite_table(

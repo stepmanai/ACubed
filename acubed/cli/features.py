@@ -20,15 +20,7 @@ def main():
 
     if app.runtime.environment == Environment.DATABRICKS_SERVERLESS:
         subprocess.check_call(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-q",
-                "narwhals",
-                "polars",
-            ]
+            [sys.executable, "-m", "pip", "install", "-q", "narwhals"]
         )
 
     executor = FeatureExecutor(
