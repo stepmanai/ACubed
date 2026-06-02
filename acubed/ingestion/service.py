@@ -1,6 +1,13 @@
 # ingestion/service.py
 
-import narwhals as nw
+import subprocess
+import sys
+
+try:
+    import narwhals as nw
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "narwhals"])
+    import narwhals as nw
 
 
 class IngestionService:
