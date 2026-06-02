@@ -1,11 +1,11 @@
-# features/algorithms/vertical_density.py
+# features/algorithms/temporal_density.py
 
 
 from acubed.features.types import NoteFeature
 from acubed.models.gameplay import Note, Stepfile
 
 
-def vertical_density(stepfile: Stepfile) -> NoteFeature:
+def temporal_density(stepfile: Stepfile) -> NoteFeature:
     """
     Notes per second in the same lane.
 

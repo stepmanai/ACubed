@@ -5,8 +5,8 @@ import sys
 from acubed.features.adapters.stepfiles import (
     events_to_stepfile,
 )
-from acubed.features.algorithms.vertical_density import (
-    vertical_density,
+from acubed.features.algorithms.temporal_density import (
+    temporal_density,
 )
 
 try:
@@ -21,7 +21,7 @@ except ImportError:
     import narwhals as nw
 
 FEATURES = {
-    "vertical_density": vertical_density,
+    "temporal_density": temporal_density,
     # "chord_density": chord_density,
     # "stream_density": stream_density,
     # "jack_density": jack_density,
