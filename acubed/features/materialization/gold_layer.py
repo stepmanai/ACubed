@@ -12,7 +12,12 @@ from acubed.features.algorithms.vertical_density import (
 try:
     import narwhals as nw
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "narwhals"])
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "narwhals"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True,
+    )
     import narwhals as nw
 
 FEATURES = {
