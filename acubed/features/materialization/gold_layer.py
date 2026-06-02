@@ -84,9 +84,8 @@ def build_gold_note_features_spark(spark_df):
             StructField("note_id", IntegerType(), False),
             StructField("time", FloatType(), False),
             StructField("lane", IntegerType(), False),
-            StructField("vertical_density", FloatType(), True),
-            # Add more feature fields as FEATURES dictionary grows
         ]
+        + [StructField(name, FloatType(), True) for name in FEATURES.keys()]
     )
 
     def process_song_partition(iterator):
@@ -94,13 +93,8 @@ def build_gold_note_features_spark(spark_df):
         for pdf in iterator:
             if pdf.empty:
                 yield pd.DataFrame(
-                    columns=[
-                        "song_id",
-                        "note_id",
-                        "time",
-                        "lane",
-                        "vertical_density",
-                    ]
+                    columns=["song_id", "note_id", "time", "lane"]
+                    + list(FEATURES.keys())
                 )
                 continue
 
