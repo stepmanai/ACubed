@@ -1,6 +1,12 @@
 # features/materialization/silver_layer.py
+import subprocess
+import sys
 
-import narwhals as nw
+try:
+    import narwhals as nw
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "narwhals"])
+    import narwhals as nw
 
 
 def build_silver_events(

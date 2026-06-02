@@ -1,6 +1,6 @@
 # features/materialization/gold_layer.py
-
-import narwhals as nw
+import subprocess
+import sys
 
 from acubed.features.adapters.stepfiles import (
     events_to_stepfile,
@@ -8,6 +8,12 @@ from acubed.features.adapters.stepfiles import (
 from acubed.features.algorithms.vertical_density import (
     vertical_density,
 )
+
+try:
+    import narwhals as nw
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "narwhals"])
+    import narwhals as nw
 
 FEATURES = {
     "vertical_density": vertical_density,

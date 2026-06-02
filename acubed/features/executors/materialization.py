@@ -1,4 +1,5 @@
-import narwhals as nw
+import subprocess
+import sys
 
 from acubed.config.tables import TableConfig
 from acubed.core.runtime import RuntimeContext
@@ -10,6 +11,12 @@ from acubed.features.materialization.silver_layer import (
     build_silver_events,
 )
 from acubed.storage.base import BaseStorage
+
+try:
+    import narwhals as nw
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "narwhals"])
+    import narwhals as nw
 
 
 class FeatureExecutor:
