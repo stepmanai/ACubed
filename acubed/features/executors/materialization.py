@@ -46,20 +46,42 @@ class FeatureExecutor:
     def materialize_gold(self):
 
         bronze_playlist_df = self.storage.read_table(self.tables.playlist)
-        event_rows = self.storage.iter_event_rows(self.tables.silver_events)
 
         gold_targets_df = nw.to_native(
             build_gold_targets(nw.from_native(bronze_playlist_df))
         )
 
-        gold_note_features_df = nw.from_dicts(
-            build_gold_note_features(event_rows), backend="pandas"
+        silver_events_spark_df = self.storage.read_table(
+            self.tables.silver_events
         )
 
-        self.storage.overwrite_table(
-            self.tables.gold_features,
-            gold_note_features_df,
-        )
+        is_spark = False
+
+        if is_spark:
+            gold_note_features_spark_df = build_gold_note_features(
+                silver_events_spark_df, use_spark=True
+            )
+
+            self.storage.overwrite_table(
+                self.tables.gold_features,
+                gold_note_features_spark_df,
+            )
+        else:
+            event_rows = self.storage.iter_event_rows(
+                self.tables.silver_events
+            )
+
+            gold_note_features_df = nw.to_native(
+                nw.from_dicts(
+                    build_gold_note_features(event_rows, use_spark=False),
+                    backend="pandas",
+                )
+            )
+
+            self.storage.overwrite_table(
+                self.tables.gold_features,
+                gold_note_features_df,
+            )
 
         self.storage.overwrite_table(
             self.tables.gold_targets,

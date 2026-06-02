@@ -23,7 +23,7 @@ FEATURES = {
 }
 
 
-def build_gold_note_features(
+def build_gold_note_features_local(
     rows,
 ) -> list[dict]:
 
@@ -51,6 +51,89 @@ def build_gold_note_features(
         output.append(row)
 
     return output
+
+
+def _compute_song_features(song_events):
+
+    rows = [
+        {
+            "song_id": row["song_id"],
+            "note_id": row["note_id"],
+            "time": row["time"],
+            "lane": row["lane"],
+        }
+        for row in song_events
+    ]
+
+    return build_gold_note_features_local(rows)
+
+
+def build_gold_note_features_spark(spark_df):
+
+    import pandas as pd
+    from pyspark.sql.types import (
+        FloatType,
+        IntegerType,
+        StructField,
+        StructType,
+    )
+
+    output_schema = StructType(
+        [
+            StructField("song_id", IntegerType(), False),
+            StructField("note_id", IntegerType(), False),
+            StructField("time", FloatType(), False),
+            StructField("lane", IntegerType(), False),
+            StructField("vertical_density", FloatType(), True),
+            # Add more feature fields as FEATURES dictionary grows
+        ]
+    )
+
+    def process_song_partition(iterator):
+
+        for pdf in iterator:
+            if pdf.empty:
+                yield pd.DataFrame(
+                    columns=[
+                        "song_id",
+                        "note_id",
+                        "time",
+                        "lane",
+                        "vertical_density",
+                    ]
+                )
+                continue
+
+            results = []
+            for _, group in pdf.groupby("song_id"):
+                rows = group.to_dict("records")
+
+                song_features = build_gold_note_features_local(rows)
+                results.extend(song_features)
+
+            yield pd.DataFrame(results)
+
+    result_df = spark_df.mapInPandas(
+        process_song_partition, schema=output_schema
+    )
+
+    return result_df
+
+
+def build_gold_note_features(
+    rows_or_df,
+    use_spark=None,
+):
+    if use_spark is None:
+        use_spark = (
+            hasattr(rows_or_df, "write")
+            and "pyspark" in type(rows_or_df).__module__
+        )
+
+    if use_spark:
+        return build_gold_note_features_spark(rows_or_df)
+    else:
+        return build_gold_note_features_local(rows_or_df)
 
 
 def build_gold_targets(

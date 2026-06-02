@@ -35,8 +35,11 @@ class DatabricksStorage(BaseStorage):
     def _ensure_spark_dataframe(self, dataframe):
         if hasattr(dataframe, "write"):
             return dataframe
-        else:
+
+        if hasattr(dataframe, "to_dict"):
             return self.spark.createDataFrame(dataframe)
+
+        return self.spark.createDataFrame(dataframe)
 
     def table_exists(self, table_name: str) -> bool:
         qualified = self._get_qualified_name(table_name)
@@ -56,10 +59,7 @@ class DatabricksStorage(BaseStorage):
         (
             spark_df.write.format("delta")
             .mode("overwrite")
-            .option(
-                "overwriteSchema",
-                "true",
-            )
+            .option("overwriteSchema", "true")
             .saveAsTable(qualified)
         )
 
@@ -99,7 +99,13 @@ class DatabricksStorage(BaseStorage):
 
         df = self.read_table(table_name)
 
-        for row in df.orderBy("song_id", "note_id").toLocalIterator():
+        df_selected = df.select("song_id", "note_id", "time", "lane").orderBy(
+            "song_id", "note_id"
+        )
+
+        rows = df_selected.collect()
+
+        for row in rows:
             yield {
                 "song_id": row["song_id"],
                 "note_id": row["note_id"],
