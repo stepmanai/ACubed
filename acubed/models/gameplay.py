@@ -13,6 +13,8 @@ class Orientation(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class Note:
+    song_id: int
+    note_id: int
     timestamp_ms: float
     lane: Orientation
 
@@ -28,6 +30,8 @@ class Stepfile:
 
     def add_note(
         self,
+        song_id: int,
+        note_id: int,
         timestamp_ms: float,
         lane: Orientation | int,
     ) -> None:
@@ -36,6 +40,8 @@ class Stepfile:
 
         self.notes.append(
             Note(
+                song_id=song_id,
+                note_id=note_id,
                 timestamp_ms=timestamp_ms,
                 lane=lane,
             )

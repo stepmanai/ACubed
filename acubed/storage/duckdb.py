@@ -126,3 +126,19 @@ class DuckDBStorage(BaseStorage):
             FROM temp_upsert
             """
         )
+
+    def iter_event_rows(self, table_name: str):
+
+        relation = self.read_table(table_name)
+
+        columns = relation.columns
+
+        for values in relation.order("song_id ASC, note_id ASC").fetchall():
+            row = dict(zip(columns, values, strict=True))
+
+            yield {
+                "song_id": row["song_id"],
+                "note_id": row["note_id"],
+                "time": row["time"],
+                "lane": row["lane"],
+            }

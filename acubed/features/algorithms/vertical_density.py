@@ -1,11 +1,11 @@
 # features/algorithms/vertical_density.py
 
-from collections.abc import Mapping
 
+from acubed.features.types import NoteFeature
 from acubed.models.gameplay import Note, Stepfile
 
 
-def vertical_density(stepfile: Stepfile) -> Mapping[Note, float]:
+def vertical_density(stepfile: Stepfile) -> NoteFeature:
     """
     Notes per second in the same lane.
 
@@ -20,6 +20,8 @@ def vertical_density(stepfile: Stepfile) -> Mapping[Note, float]:
 
         if previous_time is None:
             density[note] = 0.0
+        elif note.timestamp_ms == previous_time:
+            density[note] = float("inf")
         else:
             delta_ms = note.timestamp_ms - previous_time
             density[note] = 1000.0 / delta_ms
@@ -27,43 +29,3 @@ def vertical_density(stepfile: Stepfile) -> Mapping[Note, float]:
         last_seen[note.lane] = note.timestamp_ms
 
     return density
-
-
-# 3. Refactor vertical_density
-
-# Current (guessing):
-
-# def vertical_density(
-#     stepfile: Stepfile,
-# ) -> float:
-#     ...
-
-# Replace with:
-
-# acubed/features/algorithms/vertical_density.py
-# import narwhals as nw
-
-
-# def vertical_density(
-#     events: nw.DataFrame | nw.LazyFrame,
-# ) -> nw.DataFrame | nw.LazyFrame:
-
-#     return (
-#         events
-#         .sort("time")
-#         .with_columns(
-#             nw.col("time")
-#             .diff()
-#             .alias("delta_time")
-#         )
-#     )
-
-# Obviously replace the implementation with your actual logic.
-
-# The key change is:
-
-# Stepfile
-
-# becomes
-
-# nw.DataFrame | nw.LazyFrame

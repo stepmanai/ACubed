@@ -1,5 +1,8 @@
 # storage/databricks.py
 
+from collections.abc import Iterable, Mapping
+from typing import Any
+
 from delta.tables import DeltaTable
 
 from acubed.models.game import Game
@@ -88,3 +91,18 @@ class DatabricksStorage(BaseStorage):
             .whenNotMatchedInsertAll()
             .execute()
         )
+
+    def iter_event_rows(
+        self,
+        table_name: str,
+    ) -> Iterable[Mapping[str, Any]]:
+
+        df = self.read_table(table_name)
+
+        for row in df.orderBy("song_id", "note_id").toLocalIterator():
+            yield {
+                "song_id": row["song_id"],
+                "note_id": row["note_id"],
+                "time": row["time"],
+                "lane": row["lane"],
+            }

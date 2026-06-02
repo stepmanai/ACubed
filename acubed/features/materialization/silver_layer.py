@@ -25,23 +25,3 @@ def build_silver_events(
     )
 
     return silver_events_df
-
-
-def build_silver_songs(
-    bronze_df: nw.LazyFrame,
-) -> nw.LazyFrame:
-
-    silver_songs_df = (
-        bronze_df.with_columns(
-            song_id=nw.col("level"),
-        )
-        .select(
-            "song_id",
-            "name",
-            "difficulty",
-            "previewhash",
-        )
-        .sort("song_id")
-    )
-
-    return silver_songs_df

@@ -1,6 +1,8 @@
 # storage/base.py
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 
 class BaseStorage(ABC):
@@ -33,4 +35,11 @@ class BaseStorage(ABC):
         dataframe,
         key_columns: list[str],
     ):
+        pass
+
+    @abstractmethod
+    def iter_event_rows(
+        self,
+        table_name: str,
+    ) -> Iterable[Mapping[str, Any]]:
         pass
