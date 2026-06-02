@@ -1,8 +1,5 @@
 # cli/ingest.py
 
-import subprocess
-import sys
-
 from acubed.api.ffr import FFRClient
 from acubed.config.runtime import (
     config,
@@ -22,9 +19,6 @@ from acubed.ingestion.service import (
 from acubed.logging.factory import (
     get_logger,
 )
-from acubed.models.environment import (
-    Environment,
-)
 
 
 def main():
@@ -37,11 +31,6 @@ def main():
         "Environment: %s",
         app.environment,
     )
-
-    if app.runtime.environment == Environment.DATABRICKS_SERVERLESS:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-q", "narwhals"]
-        )
 
     api_key = get_api_key(
         app.environment,
