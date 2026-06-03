@@ -1,6 +1,7 @@
 # features/materialization/gold_layer.py
 import subprocess
 import sys
+from collections import defaultdict
 
 from acubed.features.adapters.stepfiles import (
     events_to_stepfile,
@@ -33,28 +34,34 @@ def build_gold_note_features_local(
     rows,
 ) -> list[dict]:
 
-    stepfile = events_to_stepfile(rows)
+    songs = defaultdict(list)
 
-    feature_results = {
-        name: feature(stepfile) for name, feature in FEATURES.items()
-    }
-
-    notes = next(iter(feature_results.values())).keys()
+    for row in rows:
+        songs[row["song_id"]].append(row)
 
     output = []
 
-    for note in notes:
-        row = {
-            "song_id": note.song_id,
-            "note_id": note.note_id,
-            "time": note.timestamp_ms,
-            "lane": note.lane.value,
+    for _, song_rows in songs.items():
+        stepfile = events_to_stepfile(song_rows)
+
+        feature_results = {
+            name: feature(stepfile) for name, feature in FEATURES.items()
         }
 
-        for feature_name, values in feature_results.items():
-            row[feature_name] = values[note]
+        notes = next(iter(feature_results.values())).keys()
 
-        output.append(row)
+        for note in notes:
+            row = {
+                "song_id": note.song_id,
+                "note_id": note.note_id,
+                "time": note.timestamp_ms,
+                "lane": note.lane.value,
+            }
+
+            for feature_name, values in feature_results.items():
+                row[feature_name] = values[note]
+
+            output.append(row)
 
     return output
 
