@@ -1,3 +1,5 @@
+# features/algorithms/spatial_density.py
+
 import contextvars
 import math
 from bisect import bisect_left, bisect_right

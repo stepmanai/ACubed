@@ -9,6 +9,9 @@ from acubed.features.adapters.stepfiles import (
 from acubed.features.algorithms.spatial_density import (
     spatial_density,
 )
+from acubed.features.algorithms.strain_requirement import (
+    strain_requirement,
+)
 from acubed.features.algorithms.temporal_density import (
     temporal_density,
 )
@@ -27,6 +30,7 @@ except ImportError:
 FEATURES = {
     "temporal_density": temporal_density,
     "spatial_density": spatial_density,
+    "strain_requirement": strain_requirement,
 }
 
 
