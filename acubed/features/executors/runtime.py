@@ -11,6 +11,7 @@ from acubed.features.algorithms.jacks import (
 from acubed.features.algorithms.streams import (
     stream_density,
 )
+
 from acubed.features.definitions.difficulty import (
     DifficultyFeatures,
 )

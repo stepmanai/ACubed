@@ -22,9 +22,10 @@ except ImportError:
 
 FEATURES = {
     "temporal_density": temporal_density,
-    # "chord_density": chord_density,
-    # "stream_density": stream_density,
-    # "jack_density": jack_density,
+    "spatial_density": temporal_density,
+    "accumulated_strain": temporal_density,
+    "hold_density": temporal_density,
+    "mine_density": temporal_density,
 }
 
 
