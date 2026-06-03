@@ -1,31 +1,43 @@
 # features/algorithms/temporal_density.py
 
+import math
+from collections import defaultdict
 
 from acubed.features.types import NoteFeature
-from acubed.models.gameplay import Note, Stepfile
 
 
-def temporal_density(stepfile: Stepfile) -> NoteFeature:
-    """
-    Notes per second in the same lane.
+def normalize_temporal_density(
+    x: float,
+    k: float = 5.0,
+) -> float:
 
-    First note in each lane has density 0.
-    """
+    if math.isinf(x):
+        return 1.0
 
-    last_seen: dict = {}
-    density: dict[Note, float] = {}
+    return 1.0 - math.exp(-x / k)
 
-    for note in stepfile.notes:
-        previous_time = last_seen.get(note.lane)
 
-        if previous_time is None:
-            density[note] = 0.0
-        elif note.timestamp_ms == previous_time:
-            density[note] = float("inf")
-        else:
-            delta_ms = note.timestamp_ms - previous_time
-            density[note] = 1000.0 / delta_ms
+def temporal_density(stepfile) -> NoteFeature:
+    songs = defaultdict(list)
+    for n in stepfile.notes:
+        songs[n.song_id].append(n)
 
-        last_seen[note.lane] = note.timestamp_ms
+    density: NoteFeature = {}
+
+    for _song_id, notes in songs.items():
+        last_seen = {}
+
+        for note in sorted(notes, key=lambda n: n.timestamp_ms):
+            prev = last_seen.get(note.lane)
+
+            if prev is None:
+                density[note] = 0.0
+            elif note.timestamp_ms == prev:
+                density[note] = 1.0
+            else:
+                delta = note.timestamp_ms - prev
+                density[note] = normalize_temporal_density(1000.0 / delta)
+
+            last_seen[note.lane] = note.timestamp_ms
 
     return density

@@ -13,10 +13,18 @@ class Orientation(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class Note:
-    song_id: int
-    note_id: int
+    song_id: int = 0
+    note_id: int = 0
     timestamp_ms: float
     lane: Orientation
+
+    def __hash__(self):
+        return hash((self.song_id, self.note_id))
+
+    def __eq__(self, other):
+        if not isinstance(other, Note):
+            return False
+        return (self.song_id, self.note_id) == (other.song_id, other.note_id)
 
 
 @dataclass(slots=True)

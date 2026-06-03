@@ -5,6 +5,9 @@ import sys
 from acubed.features.adapters.stepfiles import (
     events_to_stepfile,
 )
+from acubed.features.algorithms.spatial_density import (
+    spatial_density,
+)
 from acubed.features.algorithms.temporal_density import (
     temporal_density,
 )
@@ -22,10 +25,7 @@ except ImportError:
 
 FEATURES = {
     "temporal_density": temporal_density,
-    "spatial_density": temporal_density,
-    "accumulated_strain": temporal_density,
-    "hold_density": temporal_density,
-    "mine_density": temporal_density,
+    "spatial_density": spatial_density,
 }
 
 
