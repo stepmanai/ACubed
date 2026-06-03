@@ -6,6 +6,12 @@ from collections import defaultdict
 from acubed.features.adapters.stepfiles import (
     events_to_stepfile,
 )
+from acubed.features.algorithms.hold_density import (
+    hold_density,
+)
+from acubed.features.algorithms.mine_density import (
+    mine_density,
+)
 from acubed.features.algorithms.spatial_density import (
     spatial_density,
 )
@@ -31,6 +37,8 @@ FEATURES = {
     "temporal_density": temporal_density,
     "spatial_density": spatial_density,
     "strain_requirement": strain_requirement,
+    "hold_density": hold_density,
+    "mine_density": mine_density,
 }
 
 
