@@ -13,8 +13,8 @@ class Orientation(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class Note:
-    song_id: int = 0
-    note_id: int = 0
+    song_id: int
+    note_id: int
     timestamp_ms: float
     lane: Orientation
 
