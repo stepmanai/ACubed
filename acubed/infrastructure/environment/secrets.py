@@ -29,13 +29,12 @@ def get_required_secrets(
             value = _get_databricks_secret(dbutils, secret_ref)
 
         if value is None:
-            # Provide helpful debug information
             if dbutils is None:
-                hint = "dbutils is not available (not running in Databricks environment)"
+                hint = "dbutils is not available (not running in Databricks)"
             else:
                 scope = os.getenv("ACUBED_DATABRICKS_SECRET_SCOPE", "acubed")
-                transformed_key = secret_ref.lower().replace("_", "-")
-                hint = f"Tried Databricks secret at scope='{scope}', key='{transformed_key}'"
+                key = secret_ref.lower().replace("_", "-")
+                hint = f"Tried Databricks secret scope='{scope}', key='{key}'"
 
             raise ValueError(
                 f"Required secret '{secret_name}' was not found. Set "
@@ -46,13 +45,6 @@ def get_required_secrets(
         secrets[secret_name] = value
 
     return secrets
-
-
-def get_api_key(environment: Environment) -> str:
-    return get_required_secrets(
-        environment,
-        {"key": "FFR_API_KEY"},
-    )["key"]
 
 
 def _get_dbutils() -> Any | None:
@@ -85,19 +77,22 @@ def _get_databricks_secret(dbutils: Any, secret_ref: str) -> str | None:
         # Try multiple patterns to find the secret
         patterns = []
 
-        # Pattern 1: Default scope with transformed key (e.g., acubed/ffr-api-key)
+        # Pattern 1: Default scope with transformed key
+        # (e.g., acubed/ffr-api-key)
         default_scope = os.getenv("ACUBED_DATABRICKS_SECRET_SCOPE", "acubed")
         transformed_key = secret_ref.lower().replace("_", "-")
         patterns.append((default_scope, transformed_key))
 
-        # Pattern 2: Extract game from secret name as scope (e.g., FFR_API_KEY -> ffr/api-key)
+        # Pattern 2: Extract game from secret name as scope
+        # (e.g., FFR_API_KEY -> ffr/api-key)
         if "_" in secret_ref:
             parts = secret_ref.split("_")
             if len(parts) >= 2:
                 game_scope = parts[0].lower()
                 patterns.append((game_scope, "api-key"))
 
-        # Pattern 3: Game scope with full transformed key (e.g., ffr/ffr-api-key)
+        # Pattern 3: Game scope with full transformed key
+        # (e.g., ffr/ffr-api-key)
         if "_" in secret_ref:
             game_scope = secret_ref.split("_")[0].lower()
             patterns.append((game_scope, transformed_key))
