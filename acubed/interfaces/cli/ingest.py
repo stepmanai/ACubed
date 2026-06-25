@@ -68,11 +68,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run acubed chart ingestion.")
     parser.add_argument(
         "--game",
+        default="ffr",  # Set your default game here
         help="Game id to ingest. Defaults to the GAME environment variable.",
     )
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
-    asyncio.run(async_main(game_id=args.game))
+    try:
+        asyncio.get_running_loop()
+        # Running loop exists, execute in a new thread with its own loop
+        from concurrent.futures import ThreadPoolExecutor
+        
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, async_main(game_id=args.game))
+            future.result()
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run() directly
+        asyncio.run(async_main(game_id=args.game))
 
 
 if __name__ == "__main__":
