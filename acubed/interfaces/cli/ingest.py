@@ -6,8 +6,13 @@ import os
 import time
 
 from acubed.application.ingestion.engine import GameIngestionEngine
+from acubed.application.persistence.repository import (
+    ChartsRepository,
+    NotesRepository,
+)
 from acubed.infrastructure.environment.secrets import get_required_secrets
 from acubed.infrastructure.logging import get_logger
+from acubed.utils import stepfiles_to_tables
 
 
 async def async_main(game_id: str | None = None) -> None:
@@ -55,8 +60,47 @@ async def async_main(game_id: str | None = None) -> None:
         concurrency=app.settings.runtime.thread_pool_size,
     )
 
-    await engine.run()
+    # =========================================================
+    # STEP 1: INGEST
+    # =========================================================
+    stepfiles = await engine.run()
 
+    logger.info("Ingested %d stepfiles", len(stepfiles))
+
+    # =========================================================
+    # STEP 2: TRANSFORM (ETL)
+    # =========================================================
+    etl = stepfiles_to_tables(stepfiles)
+
+    logger.info(
+        "Transformed -> %d charts, %d notes",
+        len(etl.charts),
+        len(etl.notes),
+    )
+
+    # =========================================================
+    # STEP 3: LOAD (PERSISTENCE)
+    # =========================================================
+    storage = app.storage
+    table_config = app.table_config
+
+    # songs_repo = SongsRepository(
+    #     storage, table_config, logger
+    # )
+
+    charts_repo = ChartsRepository(storage, table_config, logger)
+
+    notes_repo = NotesRepository(storage, table_config, logger)
+
+    # Songs sync (if you have song data elsewhere; placeholder here)
+    # songs_repo.sync_songlist(...)
+
+    charts_repo.sync_charts(etl.charts)
+    notes_repo.sync_notes(etl.notes)
+
+    # =========================================================
+    # DONE
+    # =========================================================
     elapsed = time.time() - start_time
 
     logger.info("=" * 80)

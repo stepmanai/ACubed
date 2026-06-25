@@ -6,6 +6,7 @@ from acubed.infrastructure.filesystem.init import ensure_directories
 from acubed.infrastructure.filesystem.paths import DUCKDB_PATH
 from acubed.infrastructure.storage.config import StorageConfig
 from acubed.infrastructure.storage.factory import build_storage
+from acubed.infrastructure.storage.tables import build_table_config
 from acubed.plugins.registry import registry
 from acubed.runtime.context import RuntimeContext
 from acubed.runtime.settings import RuntimeConfig, RuntimeSettings
@@ -21,6 +22,8 @@ class ApplicationContext:
 
         self.runtime_config = RuntimeConfig()
         self.game = registry.get(self.runtime_config.game)
+
+        self.table_config = build_table_config(self.game.id)
 
         self.settings = RuntimeSettings(
             runtime=self.runtime_config,
