@@ -1,38 +1,104 @@
-<div align="center">
-    <picture>
-        <source srcset="assets/logo/dark-mode/acubed.png"  media="(prefers-color-scheme: dark)">
-        <img src="assets/logo/no-dark-mode/acubed.png" alt="Logo" width="200px" height=auto>
-    </picture>
-</div>
+# acubed
 
-[![Release](https://img.shields.io/github/v/release/stepmanai/ACubed)](https://img.shields.io/github/v/release/stepmanai/ACubed)
-[![Build status](https://img.shields.io/github/actions/workflow/status/stepmanai/ACubed/main.yml?branch=main)](https://github.com/stepmanai/ACubed/actions/workflows/main.yml?query=branch%3Amain)
-[![codecov](https://codecov.io/gh/stepmanai/ACubed/branch/main/graph/badge.svg)](https://codecov.io/gh/stepmanai/ACubed)
-[![Commit activity](https://img.shields.io/github/commit-activity/m/stepmanai/ACubed)](https://img.shields.io/github/commit-activity/m/stepmanai/ACubed)
-[![License](https://img.shields.io/github/license/stepmanai/ACubed)](https://img.shields.io/github/license/stepmanai/ACubed)
+`acubed` ingests rhythm-game chart data through small game plugins. The code is
+organized so domain contracts stay stable while each game owns its API client,
+configuration, and parser.
 
-A machine learning training framework built on Databricks with FastAPI serving for standardized difficulty scoring of stepfiles in open-source vertical scroll rhythm games.
+## Layout
 
-- **Github repository**: <https://github.com/stepmanai/ACubed/>
-- **Documentation** <https://stepmanai.github.io/ACubed/>
-
-
-## Setup
-
-Install uv:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+```text
+application/      Use cases that coordinate domain objects
+domain/           Framework-free chart and game contracts
+infrastructure/   Environment, filesystem, storage, logging, and secrets
+interfaces/       CLI and other external entry points
+plugins/          Built-in game integrations
+runtime/          Application composition and runtime settings
 ```
 
-Create environment + install dependencies:
+## Adding A Game
 
-```bash
-uv sync
+Create a new folder under `plugins/<game_id>/` with these files:
+
+```text
+plugins/<game_id>/
+  __init__.py
+  config.py
+  definition.py
+  parser.py
+  source.py
 ```
 
-Run pipeline:
+`definition.py` is the discovery point. It must expose `GAME_ID` and
+`build_game()`:
+
+```python
+from acubed.domain.game.definition import GameDefinition
+
+GAME_ID = "my_game"
+
+
+def build_game() -> GameDefinition:
+    config = MyGameConfig()
+    return GameDefinition(
+        id=GAME_ID,
+        name="My Game",
+        config=config,
+        source=MyGameSource(config),
+        parser=MyGameParser(),
+        required_secrets={"api_key": "MY_GAME_API_KEY"},
+    )
+```
+
+Use an empty `required_secrets` mapping when the game does not need credentials.
+The registry auto-discovers plugin packages, so core registry code does not need
+to be edited for new games.
+
+## Running Ingestion
+
+## Local Development With uv
+
+The project is managed by `uv` and targets Python 3.11 locally. Local storage
+uses DuckDB.
 
 ```bash
-uv run python main.py
+uv sync --python 3.11 --extra local
+uv run --extra local acubed-ingest --game etterna
 ```
+
+The Makefile wraps the common commands:
+
+```bash
+make sync-local
+make smoke
+make ingest GAME=ffr
+```
+
+For local FFR ingestion, set `FFR_API_KEY`. You can use a `.env` file locally
+when the `local` extra is installed.
+
+## Databricks Free Edition
+
+Databricks Free Edition runs on serverless compute. Install the project into a
+serverless notebook or job environment as a workspace dependency, not by
+installing PySpark from this project. Databricks provides the Spark runtime.
+
+Use `databricks-requirements.txt` when adding dependencies in the Databricks
+Environment side pane:
+
+```text
+-r /Workspace/path/to/acubed/databricks-requirements.txt
+```
+
+The Databricks storage adapter writes Delta tables through the active Spark
+session. Configure these optional environment variables if you do not want the
+defaults:
+
+```bash
+ACUBED_DATABRICKS_CATALOG=<catalog>
+ACUBED_DATABRICKS_SCHEMA=<schema>
+ACUBED_DATABRICKS_SECRET_SCOPE=acubed
+```
+
+If `ACUBED_DATABRICKS_CATALOG` is not set, tables are written under the schema
+named for the selected game. Secrets can come from Databricks secrets or from
+environment variables with the names declared by the selected game plugin.
