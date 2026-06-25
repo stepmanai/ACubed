@@ -36,7 +36,7 @@ def get_required_secrets(
                 scope = os.getenv("ACUBED_DATABRICKS_SECRET_SCOPE", "acubed")
                 transformed_key = secret_ref.lower().replace("_", "-")
                 hint = f"Tried Databricks secret at scope='{scope}', key='{transformed_key}'"
-            
+
             raise ValueError(
                 f"Required secret '{secret_name}' was not found. Set "
                 f"{secret_ref} as an environment variable or configure it in "
@@ -84,19 +84,19 @@ def _get_databricks_secret(dbutils: Any, secret_ref: str) -> str | None:
     else:
         # Try multiple patterns to find the secret
         patterns = []
-        
+
         # Pattern 1: Default scope with transformed key (e.g., acubed/ffr-api-key)
         default_scope = os.getenv("ACUBED_DATABRICKS_SECRET_SCOPE", "acubed")
         transformed_key = secret_ref.lower().replace("_", "-")
         patterns.append((default_scope, transformed_key))
-        
+
         # Pattern 2: Extract game from secret name as scope (e.g., FFR_API_KEY -> ffr/api-key)
         if "_" in secret_ref:
             parts = secret_ref.split("_")
             if len(parts) >= 2:
                 game_scope = parts[0].lower()
                 patterns.append((game_scope, "api-key"))
-        
+
         # Pattern 3: Game scope with full transformed key (e.g., ffr/ffr-api-key)
         if "_" in secret_ref:
             game_scope = secret_ref.split("_")[0].lower()
@@ -111,7 +111,9 @@ def _get_databricks_secret(dbutils: Any, secret_ref: str) -> str | None:
                 return value
         except Exception as e:
             # Log but continue trying other patterns
-            print(f"Tried scope='{scope}', key='{key}' - {type(e).__name__}: {e}")
+            print(
+                f"Tried scope='{scope}', key='{key}' - {type(e).__name__}: {e}"
+            )
             continue
-    
+
     return None
