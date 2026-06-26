@@ -99,7 +99,7 @@ def main() -> None:
         help="Game id to ingest.",
     )
 
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     asyncio.run(async_main(game_id=args.game))
 
