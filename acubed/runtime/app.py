@@ -3,40 +3,33 @@
 from acubed.infrastructure.environment.detection import detect_environment
 from acubed.infrastructure.environment.types import Environment
 from acubed.infrastructure.filesystem.init import ensure_directories
-from acubed.infrastructure.filesystem.paths import DUCKDB_PATH
-from acubed.infrastructure.storage.config import StorageConfig
 from acubed.infrastructure.storage.factory import build_storage
 from acubed.infrastructure.storage.tables import build_table_config
 from acubed.plugins.registry import registry
+from acubed.runtime.bootstrap import build_runtime_settings
 from acubed.runtime.context import RuntimeContext
-from acubed.runtime.settings import RuntimeConfig, RuntimeSettings
 
 
 class ApplicationContext:
-    def __init__(self):
+    def __init__(self, game_override: str | None = None):
 
+        # 1. environment first
         self.environment = detect_environment()
 
         if self.environment == Environment.LOCAL:
             ensure_directories()
 
-        self.runtime_config = RuntimeConfig()
-        self.game = registry.get(self.runtime_config.game)
-
-        self.table_config = build_table_config(self.game.id)
-
-        self.settings = RuntimeSettings(
-            runtime=self.runtime_config,
-            storage=StorageConfig(
-                database_path=(
-                    DUCKDB_PATH
-                    if self.environment == Environment.LOCAL
-                    else None
-                ),
-                catalog="acubed",
-                schema=self.game.id,
-            ),
+        # 2. build settings (ONLY depends on env + override)
+        self.settings = build_runtime_settings(
+            game_override=game_override,
+            environment=self.environment,
         )
+
+        # 3. derive game from settings
+        self.game = registry.get(self.settings.runtime.game)
+
+        # 4. table config depends on game
+        self.table_config = build_table_config(self.game.id)
 
         # 5. runtime context
         self.runtime = RuntimeContext(

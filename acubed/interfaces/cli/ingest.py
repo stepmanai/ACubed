@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import os
 import time
 
 from acubed.application.ingestion.engine import GameIngestionEngine
@@ -16,9 +15,6 @@ from acubed.utils import stepfiles_to_tables
 
 
 async def async_main(game_id: str | None = None) -> None:
-    if game_id:
-        os.environ["GAME"] = game_id
-
     from acubed.runtime.app import ApplicationContext
 
     start_time = time.time()
@@ -29,19 +25,15 @@ async def async_main(game_id: str | None = None) -> None:
     logger.info("=" * 80)
 
     logger.info("Initializing application context")
-    app = ApplicationContext()
+
+    # single source of truth for config + game resolution
+    app = ApplicationContext(game_override=game_id)
     game = app.runtime.game
 
     logger.info("Environment detected: %s", app.environment)
     logger.info("Selected game: %s (%s)", game.name, game.id)
-    logger.info(
-        "Catalog: %s",
-        getattr(app.storage, "catalog", "N/A"),
-    )
-    logger.info(
-        "Schema: %s",
-        getattr(app.storage, "schema", "N/A"),
-    )
+    logger.info("Catalog: %s", getattr(app.storage, "catalog", "N/A"))
+    logger.info("Schema: %s", getattr(app.storage, "schema", "N/A"))
 
     logger.info("Loading required secrets")
     secrets = get_required_secrets(app.environment, game.required_secrets)
@@ -64,7 +56,6 @@ async def async_main(game_id: str | None = None) -> None:
     # STEP 1: INGEST
     # =========================================================
     stepfiles = await engine.run()
-
     logger.info("Ingested %d stepfiles", len(stepfiles))
 
     # =========================================================
@@ -84,16 +75,8 @@ async def async_main(game_id: str | None = None) -> None:
     storage = app.storage
     table_config = app.table_config
 
-    # songs_repo = SongsRepository(
-    #     storage, table_config, logger
-    # )
-
     charts_repo = ChartsRepository(storage, table_config, logger)
-
     notes_repo = NotesRepository(storage, table_config, logger)
-
-    # Songs sync (if you have song data elsewhere; placeholder here)
-    # songs_repo.sync_songlist(...)
 
     charts_repo.sync_charts(etl.charts)
     notes_repo.sync_notes(etl.notes)
@@ -113,21 +96,12 @@ def main() -> None:
     parser.add_argument(
         "--game",
         default="ffr",
-        help="Game id to ingest. Defaults to the GAME environment variable.",
+        help="Game id to ingest.",
     )
-    args, _ = parser.parse_known_args()
 
-    try:
-        asyncio.get_running_loop()
-        from concurrent.futures import ThreadPoolExecutor
+    args = parser.parse_args()
 
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(
-                asyncio.run, async_main(game_id=args.game)
-            )
-            future.result()
-    except RuntimeError:
-        asyncio.run(async_main(game_id=args.game))
+    asyncio.run(async_main(game_id=args.game))
 
 
 if __name__ == "__main__":

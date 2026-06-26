@@ -4,64 +4,61 @@ from __future__ import annotations
 
 from typing import Any
 
+from ruamel.yaml import YAML
+
 from acubed.domain.chart.types import Stepfile
 from acubed.domain.game.protocols import ChartParser
 
 
 def parse_quaver_notes(raw: bytes, metadata: dict[str, Any] | None = None):
+    yaml = YAML(typ="safe")
+
     text = raw.decode("utf-8", errors="ignore")
+    data = yaml.load(text)
 
-    # --- Extract HitObjects block ---
-    hitobjects_section = text.split("HitObjects:")[1]
+    if not data:
+        return
 
-    # --- Parse structured lines ---
-    lines = [
-        line.strip()
-        for line in hitobjects_section.splitlines()
-        if line.strip().startswith("-")
-        or "StartTime" in line
-        or "Lane" in line
-        or "EndTime" in line
+    hitobjects = data.get("HitObjects") or []
+    if not hitobjects:
+        return
+
+    starts = [
+        obj.get("StartTime")
+        for obj in hitobjects
+        if isinstance(obj, dict) and obj.get("StartTime") is not None
     ]
 
-    objects = []
-    current = {}
+    if not starts:
+        return
 
-    for line in lines:
-        if line.startswith("- StartTime"):
-            # flush previous object
-            if "start" in current:
-                objects.append(current)
-            current = {}
+    min_start = min(starts)
 
-            current["start"] = float(line.split(":")[1].strip())
+    song_id = (
+        metadata.get("map", {}).get("id")
+        if metadata and isinstance(metadata.get("map"), dict)
+        else None
+    )
 
-        elif "StartTime" in line:
-            current["start"] = float(line.split(":")[1].strip())
+    for i, obj in enumerate(hitobjects):
+        if not isinstance(obj, dict):
+            continue
 
-        elif "Lane" in line:
-            current["lane"] = int(line.split(":")[1].strip())
+        start = obj.get("StartTime")
+        if start is None:
+            continue
 
-        elif "EndTime" in line:
-            current["end"] = float(line.split(":")[1].strip())
+        end = obj.get("EndTime")
 
-    if "start" in current:
-        objects.append(current)
-
-    # --- compute min timestamp for normalization ---
-    min_start = min(o["start"] for o in objects)
-
-    # --- yield iterable notes ---
-    for i, o in enumerate(objects):
-        start = o["start"]
-        lane = o.get("lane", 1) - 1  # zero-indexed
-        end = o.get("end")
+        lane = obj.get("Lane", 1)
+        if lane is None:
+            lane = 1
 
         yield {
-            "song_id": metadata.get("map").get("id") if metadata else None,
+            "song_id": song_id,
             "note_id": i,
             "timestamp_ms": start - min_start,
-            "lane": lane,
+            "lane": int(lane) - 1,
             "hold_duration": (end - start) if end is not None else 0,
         }
 

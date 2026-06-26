@@ -12,5 +12,5 @@ class TableConfig:
 def build_table_config(game_id: str) -> TableConfig:
     return TableConfig(
         charts="bronze__charts",
-        notes="bronze___notes",
+        notes="bronze__notes",
     )
