@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 import sys
 from pathlib import Path
@@ -14,4 +15,4 @@ if __name__ == "__main__":
     )
 
     nest_asyncio.apply()
-    async_main(game_id="ffr")
+    asyncio.run(async_main(game_id="ffr"))
