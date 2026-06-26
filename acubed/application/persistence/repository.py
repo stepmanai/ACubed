@@ -18,11 +18,6 @@ except ImportError:
     import narwhals as nw
 
 
-# =========================================================
-# ETL TRANSFORMER (Stepfile -> relational tables)
-# =========================================================
-
-
 @dataclass
 class ChartRow:
     song_id: int
@@ -37,11 +32,6 @@ class NoteRow:
     timestamp_ms: float
     lane: int
     hold_duration: float
-
-
-# =========================================================
-# BASE REPOSITORY
-# =========================================================
 
 
 class _BaseRepository:
@@ -108,43 +98,6 @@ class _BaseRepository:
         raise TypeError(f"Unsupported dataframe type: {type(native)}")
 
 
-# # =========================================================
-# # SONGS REPOSITORY (unchanged logic, cleaned typing)
-# # =========================================================
-
-# class SongsRepository(_BaseRepository):
-#     def sync_songlist(self, songs: list[dict]):
-#         current = self._frame(songs)
-
-#         exists = self.storage.table_exists(self.table_config.songlist)
-
-#         if not exists:
-#             self.storage.overwrite_table(
-#                 self.table_config.songlist,
-#                 current.to_native(),
-#             )
-
-#             self.logger.info(
-#                 "Created songlist table with %s rows",
-#                 self._row_count(current),
-#             )
-
-#             return
-
-#         self.storage.upsert_table(
-#             self.table_config.songlist,
-#             current.to_native(),
-#             ["id"],
-#         )
-
-#         self.logger.info("Songlist synced: %s row", self._row_count(current))
-
-
-# =========================================================
-# CHARTS REPOSITORY (NOW REAL CHART TABLE ONLY)
-# =========================================================
-
-
 class ChartsRepository(_BaseRepository):
     def sync_charts(self, charts: list[dict]):
         if not charts:
@@ -168,11 +121,6 @@ class ChartsRepository(_BaseRepository):
             )
 
         self.logger.info("Charts synced: %s rows", self._row_count(frame))
-
-
-# =========================================================
-# NOTES REPOSITORY (NEW — this is what you were missing)
-# =========================================================
 
 
 class NotesRepository(_BaseRepository):
