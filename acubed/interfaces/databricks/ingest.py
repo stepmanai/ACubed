@@ -1,9 +1,17 @@
+import subprocess
+import sys
 from pathlib import Path
 
-package_root = Path.cwd().parent.parent.parent
-
-%pip install -e {package_root}
+import nest_asyncio
 
 from acubed.interfaces.cli.ingest import async_main
 
-await async_main(game_id="quaver")
+if __name__ == "__main__":
+    package_root = Path.cwd().parent.parent.parent
+
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-e", str(package_root)]
+    )
+
+    nest_asyncio.apply()
+    async_main(game_id="ffr")
