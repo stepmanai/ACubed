@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from acubed.domain.chart.types import Stepfile
@@ -12,23 +14,26 @@ class ETLResult:
 def stepfiles_to_tables(stepfiles: list[Stepfile]) -> ETLResult:
     charts: list[dict] = []
     notes: list[dict] = []
+    append_chart = charts.append
+    append_note = notes.append
 
     for sf in stepfiles:
-        if not sf.notes:
+        sf_notes = sf.notes
+        if not sf_notes:
             continue
 
-        song_id = sf.notes[0].song_id
+        song_id = sf_notes[0].song_id
 
-        charts.append(
+        append_chart(
             {
                 "song_id": song_id,
                 "difficulty": sf.difficulty,
-                "note_count": len(sf.notes),
+                "note_count": len(sf_notes),
             }
         )
 
-        for note in sf.notes:
-            notes.append(
+        for note in sf_notes:
+            append_note(
                 {
                     "song_id": note.song_id,
                     "note_id": note.note_id,

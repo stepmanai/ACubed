@@ -6,6 +6,7 @@ import asyncio
 import random
 
 import httpx
+from tqdm import tqdm
 
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.protocols import ChartSource
@@ -14,6 +15,10 @@ from .config import FFRConfig
 
 
 class FFRRemoteSource(ChartSource):
+    _MAX_RETRIES = 10
+    _MAX_CONNECTIONS = 100
+    _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
+
     def __init__(self, config: FFRConfig):
         self.config = config
         self._client: httpx.AsyncClient | None = None
@@ -46,7 +51,12 @@ class FFRRemoteSource(ChartSource):
                 pool=30.0,
             )
 
-            self._client = httpx.AsyncClient(timeout=timeout)
+            limits = httpx.Limits(
+                max_connections=self._MAX_CONNECTIONS,
+                max_keepalive_connections=self._MAX_CONNECTIONS,
+            )
+
+            self._client = httpx.AsyncClient(timeout=timeout, limits=limits)
 
         return self._client
 
@@ -92,6 +102,21 @@ class FFRRemoteSource(ChartSource):
 
         return charts
 
+    def _retry_delay(
+        self,
+        attempt: int,
+        response: httpx.Response | None = None,
+    ) -> float:
+        if response is not None and response.status_code == 429:
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    return max(float(retry_after), 0.1)
+                except ValueError:
+                    pass
+
+        return min(2**attempt, 30) + random.uniform(0.1, 0.5)
+
     # -------------------------
     # single fetch (with retries)
     # -------------------------
@@ -103,9 +128,8 @@ class FFRRemoteSource(ChartSource):
         client = self._get_client()
         secrets = secrets or {}
 
-        max_retries = 10
-
-        for attempt in range(max_retries):
+        for attempt in range(self._MAX_RETRIES):
+            response: httpx.Response | None = None
             try:
                 response = await client.get(
                     self.config.base_api_url,
@@ -115,6 +139,13 @@ class FFRRemoteSource(ChartSource):
                         "level": chart_id,
                     },
                 )
+
+                if response.status_code in self._RETRYABLE_STATUSES:
+                    raise httpx.HTTPStatusError(
+                        f"Retryable HTTP {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
 
                 response.raise_for_status()
 
@@ -126,21 +157,22 @@ class FFRRemoteSource(ChartSource):
                 )
 
             except (
-                httpx.ConnectTimeout,
-                httpx.ReadTimeout,
-                httpx.HTTPStatusError,
+                httpx.HTTPError,
                 ValueError,
             ) as e:
-                if attempt == max_retries - 1:
+                if attempt == self._MAX_RETRIES - 1:
+                    details = (
+                        self._debug_dump(chart_id, response, str(e))
+                        if response is not None
+                        else str(e)
+                    )
                     raise ValueError(
                         f"FAILED chart_id={chart_id} "
-                        f"after {max_retries} retries:\n\n"
-                        f"{e}"
+                        f"after {self._MAX_RETRIES} retries:\n\n"
+                        f"{details}"
                     ) from e
 
-                delay = (2**attempt) + random.uniform(0.1, 0.5)
-
-                await asyncio.sleep(delay)
+                await asyncio.sleep(self._retry_delay(attempt, response))
 
     # -------------------------
     # concurrency layer
@@ -155,12 +187,25 @@ class FFRRemoteSource(ChartSource):
         sem = asyncio.Semaphore(concurrency)
 
         async def bounded(chart: ChartRef):
-            await asyncio.sleep(random.uniform(0.05, 0.3))
-
             async with sem:
                 result = await self.fetch_assets(chart.id, secrets)
                 return chart, result
 
-        tasks = [bounded(c) for c in charts]
+        tasks = [asyncio.create_task(bounded(chart)) for chart in charts]
+        results: list[tuple[ChartRef, AssetResponse]] = []
 
-        return await asyncio.gather(*tasks)
+        try:
+            for task in tqdm(
+                asyncio.as_completed(tasks),
+                total=len(tasks),
+                desc="Download FFR charts",
+                unit="chart",
+            ):
+                results.append(await task)
+        except Exception:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+        return results

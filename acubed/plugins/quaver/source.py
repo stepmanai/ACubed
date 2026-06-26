@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Awaitable, Callable
 from urllib.parse import urljoin
 
 import httpx
@@ -13,6 +14,11 @@ from .config import QuaverConfig
 
 
 class QuaverRemoteSource(ChartSource):
+    _MAX_RETRIES = 5
+    _CHART_RETRIES = 10
+    _DEFAULT_MAX_CONNECTIONS = 100
+    _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
+
     def __init__(self, config: QuaverConfig):
         self.config = config
         self._client: httpx.AsyncClient | None = None
@@ -33,8 +39,8 @@ class QuaverRemoteSource(ChartSource):
             )
 
             limits = httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
+                max_connections=self._DEFAULT_MAX_CONNECTIONS,
+                max_keepalive_connections=self._DEFAULT_MAX_CONNECTIONS,
             )
 
             self._client = httpx.AsyncClient(
@@ -52,37 +58,71 @@ class QuaverRemoteSource(ChartSource):
     # -------------------------
     # request helpers
     # -------------------------
-    async def _request_json(self, client: httpx.AsyncClient, url: str):
-        for attempt in range(5):
-            try:
-                resp = await asyncio.wait_for(client.get(url), timeout=15)
-                resp.raise_for_status()
+    def _retry_delay(
+        self,
+        attempt: int,
+        response: httpx.Response | None = None,
+    ) -> float:
+        if response is not None and response.status_code == 429:
+            retry_after = response.headers.get("retry-after")
+            if retry_after:
+                try:
+                    return max(float(retry_after), 0.1)
+                except ValueError:
+                    pass
 
-                if not resp.content:
+        return min(2**attempt, 30) + random.uniform(0.1, 0.5)
+
+    async def _request(
+        self,
+        request: Callable[[], Awaitable[httpx.Response]],
+        url: str,
+        *,
+        max_retries: int,
+    ) -> httpx.Response:
+        for attempt in range(max_retries):
+            response: httpx.Response | None = None
+
+            try:
+                response = await request()
+
+                if response.status_code in self._RETRYABLE_STATUSES:
+                    raise httpx.HTTPStatusError(
+                        f"Retryable HTTP {response.status_code}: {url}",
+                        request=response.request,
+                        response=response,
+                    )
+
+                response.raise_for_status()
+
+                if not response.content:
                     raise ValueError(f"EMPTY RESPONSE: {url}")
 
-                return resp.json()
+                return response
 
             except (TimeoutError, httpx.HTTPError, ValueError):
-                if attempt == 4:
+                if attempt == max_retries - 1:
                     raise
-                await asyncio.sleep((2**attempt) + random.uniform(0.1, 0.5))
+
+                await asyncio.sleep(self._retry_delay(attempt, response))
+
+        raise RuntimeError(f"Unreachable retry state: {url}")
+
+    async def _request_json(self, client: httpx.AsyncClient, url: str):
+        response = await self._request(
+            lambda: client.get(url),
+            url,
+            max_retries=self._MAX_RETRIES,
+        )
+        return response.json()
 
     async def _request_content(self, client: httpx.AsyncClient, url: str):
-        for attempt in range(5):
-            try:
-                resp = await asyncio.wait_for(client.get(url), timeout=15)
-                resp.raise_for_status()
-
-                if not resp.content:
-                    raise ValueError(f"EMPTY RESPONSE: {url}")
-
-                return resp.content
-
-            except (TimeoutError, httpx.HTTPError, ValueError):
-                if attempt == 4:
-                    raise
-                await asyncio.sleep((2**attempt) + random.uniform(0.1, 0.5))
+        response = await self._request(
+            lambda: client.get(url),
+            url,
+            max_retries=self._MAX_RETRIES,
+        )
+        return response.content
 
     # -------------------------
     # NAME RESOLUTION LAYER (IMPORTANT)
@@ -181,7 +221,7 @@ class QuaverRemoteSource(ChartSource):
     ) -> AssetResponse:
         client = self._get_client()
 
-        for attempt in range(10):
+        for attempt in range(self._CHART_RETRIES):
             try:
                 info_task = asyncio.create_task(
                     self._fetch_chart_info(client, chart_id)
@@ -190,7 +230,15 @@ class QuaverRemoteSource(ChartSource):
                     self._fetch_chart_data(client, chart_id)
                 )
 
-                info, chart_bytes = await asyncio.gather(info_task, chart_task)
+                info, chart_bytes = await asyncio.gather(
+                    info_task,
+                    chart_task,
+                    return_exceptions=True,
+                )
+
+                for result in (info, chart_bytes):
+                    if isinstance(result, Exception):
+                        raise result
 
                 if not chart_bytes:
                     raise ValueError(f"EMPTY CHART {chart_id}")
@@ -201,9 +249,9 @@ class QuaverRemoteSource(ChartSource):
                 )
 
             except (TimeoutError, httpx.HTTPError, ValueError):
-                if attempt == 9:
+                if attempt == self._CHART_RETRIES - 1:
                     raise
-                await asyncio.sleep((2**attempt) + random.uniform(0.1, 0.5))
+                await asyncio.sleep(self._retry_delay(attempt))
 
     # -------------------------
     # concurrency
@@ -218,33 +266,9 @@ class QuaverRemoteSource(ChartSource):
         self._get_client()
         sem = asyncio.Semaphore(concurrency)
 
-        queue = asyncio.Queue()
-        for chart in charts:
-            queue.put_nowait(chart)
+        async def fetch_chart(chart: ChartRef):
+            async with sem:
+                result = await self.fetch_assets(chart.id, secrets)
+                return chart, result
 
-        results: list[tuple[ChartRef, AssetResponse]] = []
-
-        async def worker():
-            while True:
-                try:
-                    chart = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    return
-
-                async with sem:
-                    await asyncio.sleep(random.uniform(0.02, 0.1))
-
-                    result = await self.fetch_assets(
-                        chart.id,
-                        secrets,
-                    )
-
-                    results.append((chart, result))
-
-                queue.task_done()
-
-        workers = [asyncio.create_task(worker()) for _ in range(concurrency)]
-
-        await asyncio.gather(*workers)
-
-        return results
+        return await asyncio.gather(*(fetch_chart(chart) for chart in charts))

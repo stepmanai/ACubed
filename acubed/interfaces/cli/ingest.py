@@ -61,12 +61,15 @@ async def async_main(game_id: str | None = None) -> None:
     # =========================================================
     # STEP 2: TRANSFORM (ETL)
     # =========================================================
+    transform_start = time.time()
     etl = stepfiles_to_tables(stepfiles)
+    transform_elapsed = time.time() - transform_start
 
     logger.info(
-        "Transformed -> %d charts, %d notes",
+        "Transformed -> %d charts, %d notes in %.2f seconds",
         len(etl.charts),
         len(etl.notes),
+        transform_elapsed,
     )
 
     # =========================================================
@@ -78,8 +81,11 @@ async def async_main(game_id: str | None = None) -> None:
     charts_repo = ChartsRepository(storage, table_config, logger)
     notes_repo = NotesRepository(storage, table_config, logger)
 
+    load_start = time.time()
     charts_repo.sync_charts(etl.charts)
     notes_repo.sync_notes(etl.notes)
+    load_elapsed = time.time() - load_start
+    logger.info("Loaded tables in %.2f seconds", load_elapsed)
 
     # =========================================================
     # DONE
