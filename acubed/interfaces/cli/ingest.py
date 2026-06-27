@@ -1,5 +1,7 @@
 """Command-line entry point for chart ingestion."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import time
@@ -7,9 +9,11 @@ import time
 from acubed.application.ingestion.engine import GameIngestionEngine
 from acubed.application.persistence.repository import (
     ChartsRepository,
+    DatabricksStepfileRepository,
     NotesRepository,
 )
 from acubed.infrastructure.environment.secrets import get_required_secrets
+from acubed.infrastructure.environment.types import is_databricks_environment
 from acubed.infrastructure.logging import get_logger
 from acubed.utils import stepfiles_to_tables
 
@@ -55,8 +59,30 @@ async def async_main(game_id: str | None = None) -> None:
     # =========================================================
     # STEP 1: INGEST
     # =========================================================
+    ingest_start = time.time()
     stepfiles = await engine.run()
-    logger.info("Ingested %d stepfiles", len(stepfiles))
+    ingest_elapsed = time.time() - ingest_start
+    logger.info(
+        "Ingested %d stepfiles in %.2f seconds",
+        len(stepfiles),
+        ingest_elapsed,
+    )
+
+    if is_databricks_environment(app.environment):
+        repository = DatabricksStepfileRepository(
+            app.storage,
+            app.table_config,
+            logger,
+            workers=app.settings.runtime.thread_pool_size,
+        )
+        repository.sync_stepfiles(stepfiles)
+
+        elapsed = time.time() - start_time
+        logger.info("=" * 80)
+        logger.info("INGESTION COMPLETED IN %.2f SECONDS", elapsed)
+        logger.info("  Ingest: %.2f seconds", ingest_elapsed)
+        logger.info("=" * 80)
+        return
 
     # =========================================================
     # STEP 2: TRANSFORM (ETL)

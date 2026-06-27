@@ -1,6 +1,9 @@
 # infrastructure/storage/factory.py
 
-from acubed.infrastructure.environment.types import Environment
+from acubed.infrastructure.environment.types import (
+    Environment,
+    is_databricks_environment,
+)
 from acubed.infrastructure.filesystem.paths import DUCKDB_PATH
 from acubed.runtime.context import RuntimeContext
 
@@ -20,10 +23,7 @@ def build_storage(
             schema=config.schema or context.game.id,
         )
 
-    if context.environment in {
-        Environment.DATABRICKS,
-        Environment.DATABRICKS_SERVERLESS,
-    }:
+    if is_databricks_environment(context.environment):
         from pyspark.sql import SparkSession
 
         from acubed.infrastructure.storage.databricks import DatabricksStorage

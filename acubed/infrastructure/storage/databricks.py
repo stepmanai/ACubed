@@ -8,10 +8,46 @@ serverless Databricks environments provide the Spark client runtime.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
+from acubed.domain.chart.types import Stepfile
 from acubed.domain.game.definition import GameDefinition
 from acubed.infrastructure.storage.base import BaseStorage
+from acubed.infrastructure.storage.tables import TableConfig
+from acubed.utils import stepfiles_to_tables
+
+
+def _stepfile_to_tables(stepfile: Stepfile):
+    try:
+        etl = stepfiles_to_tables([stepfile])
+        return [(etl.charts, etl.notes)]
+    except Exception:
+        return []
+
+
+def _extract_charts(tables):
+    charts, _ = tables
+    return charts
+
+
+def _extract_notes(tables):
+    _, notes = tables
+    return notes
+
+
+@dataclass
+class DatabricksTableFrames:
+    charts: Any
+    notes: Any
+    charts_count: int
+    notes_count: int
+    _cached_frames: tuple[Any, ...]
+
+    def unpersist(self) -> None:
+        for frame in self._cached_frames:
+            if hasattr(frame, "unpersist"):
+                frame.unpersist()
 
 
 class DatabricksStorage(BaseStorage):
@@ -66,6 +102,97 @@ class DatabricksStorage(BaseStorage):
             return dataframe
 
         return self.spark.createDataFrame(dataframe)
+
+    def _empty_dataframe(self, columns: Sequence[str]):
+        from pyspark.sql.types import (
+            DoubleType,
+            LongType,
+            StructField,
+            StructType,
+        )
+
+        numeric_types = {
+            "song_id": LongType(),
+            "note_id": LongType(),
+            "note_count": LongType(),
+            "timestamp_ms": DoubleType(),
+            "lane": LongType(),
+            "hold_duration": DoubleType(),
+            "difficulty": DoubleType(),
+        }
+
+        return self.spark.createDataFrame(
+            [],
+            StructType(
+                [
+                    StructField(column, numeric_types[column], True)
+                    for column in columns
+                ]
+            ),
+        )
+
+    def _dataframe_from_rdd(self, rdd, columns: Sequence[str]):
+        if rdd.isEmpty():
+            return self._empty_dataframe(columns)
+
+        return self.spark.createDataFrame(rdd)
+
+    def distributed_stepfiles_to_tables(
+        self,
+        stepfiles: Sequence[Stepfile],
+        workers: int,
+    ) -> DatabricksTableFrames:
+        if not stepfiles:
+            charts = self._empty_dataframe(
+                ("song_id", "difficulty", "note_count")
+            )
+            notes = self._empty_dataframe(
+                (
+                    "song_id",
+                    "note_id",
+                    "timestamp_ms",
+                    "lane",
+                    "hold_duration",
+                )
+            )
+            return DatabricksTableFrames(
+                charts=charts,
+                notes=notes,
+                charts_count=0,
+                notes_count=0,
+                _cached_frames=(),
+            )
+
+        stepfiles_rdd = self.spark.sparkContext.parallelize(
+            stepfiles,
+            numSlices=max(workers, 1),
+        )
+        tables_rdd = stepfiles_rdd.flatMap(_stepfile_to_tables).cache()
+        charts_rdd = tables_rdd.flatMap(_extract_charts)
+        notes_rdd = tables_rdd.flatMap(_extract_notes)
+
+        charts = self._dataframe_from_rdd(
+            charts_rdd,
+            ("song_id", "difficulty", "note_count"),
+        ).cache()
+        notes = self._dataframe_from_rdd(
+            notes_rdd,
+            (
+                "song_id",
+                "note_id",
+                "timestamp_ms",
+                "lane",
+                "hold_duration",
+            ),
+        ).cache()
+
+        return DatabricksTableFrames(
+            charts=charts,
+            notes=notes,
+            charts_count=charts.count(),
+            notes_count=notes.count(),
+            _cached_frames=(charts, notes, tables_rdd),
+        )
 
     def table_exists(self, table_name: str) -> bool:
         qualified = self._get_qualified_name(table_name)
@@ -125,6 +252,55 @@ class DatabricksStorage(BaseStorage):
             VALUES ({insert_values})
             """
         )
+
+    def sync_delta_table(
+        self,
+        table_name: str,
+        dataframe,
+        key_columns: Sequence[str],
+        partition_columns: Sequence[str] | None = None,
+    ) -> str:
+        qualified = self._get_qualified_name(table_name)
+        spark_df = self._ensure_spark_dataframe(dataframe)
+
+        if not self.table_exists(table_name):
+            writer = spark_df.write.format("delta").mode("overwrite")
+            if partition_columns:
+                writer = writer.partitionBy(*partition_columns)
+            writer.saveAsTable(qualified)
+            return "created"
+
+        self.upsert_table(table_name, spark_df, key_columns)
+        return "merged"
+
+    def sync_ingestion_tables(
+        self,
+        table_config: TableConfig,
+        frames: DatabricksTableFrames,
+    ) -> dict[str, str]:
+        chart_action = self.sync_delta_table(
+            table_config.charts,
+            frames.charts,
+            key_columns=("song_id",),
+        )
+        note_action = self.sync_delta_table(
+            table_config.notes,
+            frames.notes,
+            key_columns=("song_id", "note_id"),
+            partition_columns=("song_id",),
+        )
+        return {
+            table_config.charts: chart_action,
+            table_config.notes: note_action,
+        }
+
+    def optimize_tables(self, table_names: Sequence[str]) -> None:
+        for table_name in table_names:
+            qualified = self._get_qualified_name(table_name)
+            self.spark.sql(f"OPTIMIZE {qualified}")
+            self.spark.sql(
+                f"ANALYZE TABLE {qualified} COMPUTE STATISTICS FOR ALL COLUMNS"
+            )
 
     def iter_event_rows(
         self,

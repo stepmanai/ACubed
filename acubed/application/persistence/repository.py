@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 
 import pandas as pd
@@ -146,6 +148,94 @@ class NotesRepository(_BaseRepository):
             )
 
         self.logger.info("Notes synced: %s rows", self._row_count(frame))
+
+
+class DatabricksStepfileRepository:
+    def __init__(
+        self,
+        storage,
+        table_config,
+        logger,
+        workers: int,
+    ):
+        self.storage = storage
+        self.table_config = table_config
+        self.logger = logger
+        self.workers = int(os.getenv("ACUBED_DATABRICKS_WORKERS", workers))
+
+        required_methods = (
+            "distributed_stepfiles_to_tables",
+            "sync_ingestion_tables",
+            "optimize_tables",
+        )
+        missing = [
+            method
+            for method in required_methods
+            if not hasattr(storage, method)
+        ]
+        if missing:
+            raise TypeError(
+                "DatabricksStepfileRepository requires Databricks storage "
+                f"methods: {', '.join(missing)}"
+            )
+
+    def sync_stepfiles(self, stepfiles) -> dict[str, float]:
+        self.logger.info("=" * 80)
+        self.logger.info("OPTIMIZED INGESTION PIPELINE - SPARK NATIVE")
+        self.logger.info("=" * 80)
+        self.logger.info("Workers: %s", self.workers)
+
+        transform_start = time.time()
+        frames = self.storage.distributed_stepfiles_to_tables(
+            stepfiles,
+            self.workers,
+        )
+        transform_elapsed = time.time() - transform_start
+
+        self.logger.info(
+            "Transformed in %.2fs (distributed)",
+            transform_elapsed,
+        )
+        self.logger.info("Charts: %s rows", f"{frames.charts_count:,}")
+        self.logger.info("Notes: %s rows", f"{frames.notes_count:,}")
+
+        load_start = time.time()
+        try:
+            actions = self.storage.sync_ingestion_tables(
+                self.table_config,
+                frames,
+            )
+            load_elapsed = time.time() - load_start
+            self.logger.info("Loaded tables in %.2fs", load_elapsed)
+
+            for table_name, action in actions.items():
+                self.logger.info("%s %s", action.title(), table_name)
+
+            optimize_start = time.time()
+            self.logger.info("Optimizing Delta tables")
+            self.storage.optimize_tables(
+                (self.table_config.charts, self.table_config.notes)
+            )
+            optimize_elapsed = time.time() - optimize_start
+            self.logger.info(
+                "Optimization complete in %.2fs",
+                optimize_elapsed,
+            )
+        finally:
+            frames.unpersist()
+
+        self.logger.info("=" * 80)
+        self.logger.info("DATABRICKS PHASES")
+        self.logger.info("  Transform: %.2fs (distributed)", transform_elapsed)
+        self.logger.info("  Load:      %.2fs", load_elapsed)
+        self.logger.info("  Optimize:  %.2fs", optimize_elapsed)
+        self.logger.info("=" * 80)
+
+        return {
+            "transform": transform_elapsed,
+            "load": load_elapsed,
+            "optimize": optimize_elapsed,
+        }
 
 
 # # =========================================================

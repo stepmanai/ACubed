@@ -1,5 +1,7 @@
 # runtime/app.py
 
+from __future__ import annotations
+
 from acubed.infrastructure.environment.detection import detect_environment
 from acubed.infrastructure.environment.types import Environment
 from acubed.infrastructure.filesystem.init import ensure_directories
