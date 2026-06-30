@@ -11,37 +11,54 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from acubed.domain.chart.types import Stepfile
+from acubed.domain.chart.types import AssetResponse, ChartRef
 from acubed.domain.game.definition import GameDefinition
 from acubed.infrastructure.storage.base import BaseStorage
 from acubed.infrastructure.storage.tables import TableConfig
-from acubed.utils import stepfiles_to_tables
+from acubed.utils import api_assets_to_bronze_tables
+
+# API parsing is disabled while bronze chart tables are being built.
+# def _stepfile_to_tables(stepfile: Stepfile):
+#     try:
+#         etl = stepfiles_to_tables([stepfile])
+#         return [(etl.charts, etl.notes)]
+#     except Exception:
+#         return []
 
 
-def _stepfile_to_tables(stepfile: Stepfile):
+def _api_asset_to_bronze(asset: tuple[ChartRef, AssetResponse]):
     try:
-        etl = stepfiles_to_tables([stepfile])
-        return [(etl.charts, etl.notes)]
+        etl = api_assets_to_bronze_tables([asset])
+        return etl.charts
     except Exception:
         return []
 
 
-def _extract_charts(tables):
-    charts, _ = tables
-    return charts
+def _api_asset_to_bronze_source(asset: tuple[ChartRef, AssetResponse]):
+    try:
+        etl = api_assets_to_bronze_tables([asset])
+        return etl.source
+    except Exception:
+        return []
 
 
-def _extract_notes(tables):
-    _, notes = tables
-    return notes
+# API parsing is disabled while bronze chart tables are being built.
+# def _extract_charts(tables):
+#     charts, _ = tables
+#     return charts
+#
+#
+# def _extract_notes(tables):
+#     _, notes = tables
+#     return notes
 
 
 @dataclass
 class DatabricksTableFrames:
     charts: Any
-    notes: Any
+    source: Any
     charts_count: int
-    notes_count: int
+    source_count: int
     _cached_frames: tuple[Any, ...]
 
     def unpersist(self) -> None:
@@ -107,6 +124,7 @@ class DatabricksStorage(BaseStorage):
         from pyspark.sql.types import (
             DoubleType,
             LongType,
+            StringType,
             StructField,
             StructType,
         )
@@ -119,6 +137,13 @@ class DatabricksStorage(BaseStorage):
             "lane": LongType(),
             "hold_duration": DoubleType(),
             "difficulty": DoubleType(),
+            "_acubed_chart_id": StringType(),
+            "_acubed_collection_id": StringType(),
+            "_acubed_source_id": StringType(),
+            "api_payload": StringType(),
+            "chart_title": StringType(),
+            "chart_artist": StringType(),
+            "chart_base64": StringType(),
         }
 
         return self.spark.createDataFrame(
@@ -137,61 +162,127 @@ class DatabricksStorage(BaseStorage):
 
         return self.spark.createDataFrame(rdd)
 
-    def distributed_stepfiles_to_tables(
+    # API parsing is disabled while bronze chart tables are being built.
+    # def distributed_stepfiles_to_tables(
+    #     self,
+    #     stepfiles: Sequence[Stepfile],
+    #     workers: int,
+    # ) -> DatabricksTableFrames:
+    #     if not stepfiles:
+    #         charts = self._empty_dataframe(
+    #             ("_acubed_chart_id", "api_payload")
+    #         )
+    #         notes = self._empty_dataframe(
+    #             (
+    #                 "song_id",
+    #                 "note_id",
+    #                 "timestamp_ms",
+    #                 "lane",
+    #                 "hold_duration",
+    #             )
+    #         )
+    #         return DatabricksTableFrames(
+    #             charts=charts,
+    #             notes=notes,
+    #             charts_count=0,
+    #             notes_count=0,
+    #             _cached_frames=(),
+    #         )
+    #
+    #     stepfiles_rdd = self.spark.sparkContext.parallelize(
+    #         stepfiles,
+    #         numSlices=max(workers, 1),
+    #     )
+    #     tables_rdd = stepfiles_rdd.flatMap(_stepfile_to_tables).cache()
+    #     charts_rdd = tables_rdd.flatMap(_extract_charts)
+    #     notes_rdd = tables_rdd.flatMap(_extract_notes)
+    #
+    #     charts = self._dataframe_from_rdd(
+    #         charts_rdd,
+    #         ("_acubed_chart_id", "api_payload"),
+    #     ).cache()
+    #     notes = self._dataframe_from_rdd(
+    #         notes_rdd,
+    #         (
+    #             "song_id",
+    #             "note_id",
+    #             "timestamp_ms",
+    #             "lane",
+    #             "hold_duration",
+    #         ),
+    #     ).cache()
+    #
+    #     return DatabricksTableFrames(
+    #         charts=charts,
+    #         notes=notes,
+    #         charts_count=charts.count(),
+    #         notes_count=notes.count(),
+    #         _cached_frames=(charts, notes, tables_rdd),
+    #     )
+
+    def distributed_api_assets_to_bronze_tables(
         self,
-        stepfiles: Sequence[Stepfile],
+        assets: Sequence[tuple[ChartRef, AssetResponse]],
         workers: int,
     ) -> DatabricksTableFrames:
-        if not stepfiles:
+        if not assets:
             charts = self._empty_dataframe(
-                ("song_id", "difficulty", "note_count")
-            )
-            notes = self._empty_dataframe(
                 (
-                    "song_id",
-                    "note_id",
-                    "timestamp_ms",
-                    "lane",
-                    "hold_duration",
+                    "_acubed_chart_id",
+                    "_acubed_collection_id",
+                    "chart_title",
+                    "chart_artist",
+                    "api_payload",
+                )
+            )
+            source = self._empty_dataframe(
+                (
+                    "_acubed_source_id",
+                    "_acubed_chart_id",
+                    "_acubed_collection_id",
+                    "chart_base64",
                 )
             )
             return DatabricksTableFrames(
                 charts=charts,
-                notes=notes,
+                source=source,
                 charts_count=0,
-                notes_count=0,
+                source_count=0,
                 _cached_frames=(),
             )
 
-        stepfiles_rdd = self.spark.sparkContext.parallelize(
-            stepfiles,
+        assets_rdd = self.spark.sparkContext.parallelize(
+            assets,
             numSlices=max(workers, 1),
         )
-        tables_rdd = stepfiles_rdd.flatMap(_stepfile_to_tables).cache()
-        charts_rdd = tables_rdd.flatMap(_extract_charts)
-        notes_rdd = tables_rdd.flatMap(_extract_notes)
-
+        charts_rdd = assets_rdd.flatMap(_api_asset_to_bronze)
+        source_rdd = assets_rdd.flatMap(_api_asset_to_bronze_source)
         charts = self._dataframe_from_rdd(
             charts_rdd,
-            ("song_id", "difficulty", "note_count"),
-        ).cache()
-        notes = self._dataframe_from_rdd(
-            notes_rdd,
             (
-                "song_id",
-                "note_id",
-                "timestamp_ms",
-                "lane",
-                "hold_duration",
+                "_acubed_chart_id",
+                "_acubed_collection_id",
+                "chart_title",
+                "chart_artist",
+                "api_payload",
+            ),
+        ).cache()
+        source = self._dataframe_from_rdd(
+            source_rdd,
+            (
+                "_acubed_source_id",
+                "_acubed_chart_id",
+                "_acubed_collection_id",
+                "chart_base64",
             ),
         ).cache()
 
         return DatabricksTableFrames(
             charts=charts,
-            notes=notes,
+            source=source,
             charts_count=charts.count(),
-            notes_count=notes.count(),
-            _cached_frames=(charts, notes, tables_rdd),
+            source_count=source.count(),
+            _cached_frames=(charts, source),
         )
 
     def table_exists(self, table_name: str) -> bool:
@@ -270,6 +361,22 @@ class DatabricksStorage(BaseStorage):
             writer.saveAsTable(qualified)
             return "created"
 
+        target_columns = set(self.spark.table(qualified).columns)
+        source_columns = set(spark_df.columns)
+        if (
+            not set(key_columns).issubset(target_columns)
+            or target_columns != source_columns
+        ):
+            writer = (
+                spark_df.write.format("delta")
+                .mode("overwrite")
+                .option("overwriteSchema", "true")
+            )
+            if partition_columns:
+                writer = writer.partitionBy(*partition_columns)
+            writer.saveAsTable(qualified)
+            return "replaced"
+
         self.upsert_table(table_name, spark_df, key_columns)
         return "merged"
 
@@ -281,18 +388,19 @@ class DatabricksStorage(BaseStorage):
         chart_action = self.sync_delta_table(
             table_config.charts,
             frames.charts,
-            key_columns=("song_id",),
+            key_columns=("_acubed_chart_id",),
         )
-        note_action = self.sync_delta_table(
-            table_config.notes,
-            frames.notes,
-            key_columns=("song_id", "note_id"),
-            partition_columns=("song_id",),
-        )
-        return {
+        actions = {
             table_config.charts: chart_action,
-            table_config.notes: note_action,
         }
+        if frames.source is not None:
+            actions[table_config.source] = self.sync_delta_table(
+                table_config.source,
+                frames.source,
+                key_columns=("_acubed_source_id",),
+            )
+
+        return actions
 
     def optimize_tables(self, table_names: Sequence[str]) -> None:
         for table_name in table_names:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,8 @@ class Note:
 class Stepfile:
     notes: list[Note] = field(default_factory=list)
     difficulty: float = 0.0
+    source_chart_id: str | None = None
+    raw_api_payload: dict[str, Any] | None = None
 
     @property
     def length(self) -> int:
@@ -59,6 +61,7 @@ class Stepfile:
 class Pack:
     id: str
     name: str
+    raw_payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -67,8 +70,15 @@ class ChartRef:
     title: str
     artist: str
     pack_id: str
+    raw_payload: dict[str, Any] | None = None
 
 
-class AssetResponse(NamedTuple):
-    metadata: bytes
-    raw_chart: bytes
+@dataclass(frozen=True)
+class AssetResponse:
+    metadata: Any
+    raw_chart: Any
+    raw_payload: dict[str, Any] | None = None
+
+    def __iter__(self):
+        yield self.metadata
+        yield self.raw_chart

@@ -22,6 +22,7 @@ class FFRRemoteSource(ChartSource):
     def __init__(self, config: FFRConfig):
         self.config = config
         self._client: httpx.AsyncClient | None = None
+        self._collection_payloads: dict[str, dict] = {}
 
     def _debug_dump(
         self, chart_id: str, response: httpx.Response, reason: str
@@ -74,8 +75,16 @@ class FFRRemoteSource(ChartSource):
             Pack(
                 id="ffr_default_engine",
                 name="FlashFlashRevolution Engine Playlist",
+                raw_payload={
+                    "id": "ffr_default_engine",
+                    "name": "FlashFlashRevolution Engine Playlist",
+                    "playlist_url": self.config.playlist_url,
+                },
             )
         ]
+
+    def resolve_pack_payload(self, pack_id: str):
+        return self._collection_payloads.get(pack_id)
 
     # -------------------------
     # pack charts
@@ -88,6 +97,11 @@ class FFRRemoteSource(ChartSource):
         response.raise_for_status()
 
         playlist = response.json()
+        self._collection_payloads[pack_id] = {
+            "id": pack_id,
+            "playlist_url": str(response.url),
+            "songs": playlist,
+        }
 
         charts = []
         for song in playlist:
@@ -97,6 +111,7 @@ class FFRRemoteSource(ChartSource):
                     title=song["name"],
                     artist=song["author"],
                     pack_id=pack_id,
+                    raw_payload=song,
                 )
             )
 
@@ -154,6 +169,7 @@ class FFRRemoteSource(ChartSource):
                 return AssetResponse(
                     metadata=payload["info"],
                     raw_chart=payload["chart"],
+                    raw_payload=payload,
                 )
 
             except (

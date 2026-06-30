@@ -100,54 +100,119 @@ class _BaseRepository:
         raise TypeError(f"Unsupported dataframe type: {type(native)}")
 
 
-class ChartsRepository(_BaseRepository):
+class BronzeRepository(_BaseRepository):
+    def _columns_for_table(self, table_name: str):
+        table = self.storage.read_table(table_name)
+        columns = getattr(table, "columns", None)
+        if columns is not None:
+            return set(columns)
+        schema = getattr(table, "schema", None)
+        if schema is not None and hasattr(schema, "names"):
+            return set(schema.names)
+        return set()
+
+    def sync_rows(
+        self,
+        table_name: str,
+        rows: list[dict],
+        key_columns: list[str],
+        label: str,
+    ):
+        if not rows:
+            self.logger.info("No %s to sync", label)
+            return
+
+        rows = self._dedupe_rows(rows, key_columns)
+        frame = self._frame(rows)
+        exists = self.storage.table_exists(table_name)
+        table_columns = (
+            self._columns_for_table(table_name) if exists else set()
+        )
+        row_columns = set(rows[0])
+
+        if (
+            exists
+            and set(key_columns).issubset(table_columns)
+            and table_columns == row_columns
+        ):
+            self.storage.upsert_table(
+                table_name,
+                frame.to_native(),
+                key_columns,
+            )
+        else:
+            self.storage.overwrite_table(
+                table_name,
+                frame.to_native(),
+            )
+
+        self.logger.info("%s synced: %s rows", label, self._row_count(frame))
+
+    def _dedupe_rows(
+        self,
+        rows: list[dict],
+        key_columns: list[str],
+    ) -> list[dict]:
+        deduped = {}
+        for row in rows:
+            key = tuple(row.get(column) for column in key_columns)
+            deduped[key] = row
+
+        return list(deduped.values())
+
+    def sync_collections(self, collections: list[dict]):
+        self.sync_rows(
+            self.table_config.collections,
+            collections,
+            ["_acubed_collection_id"],
+            "Collections",
+        )
+
     def sync_charts(self, charts: list[dict]):
-        if not charts:
-            self.logger.info("No charts to sync")
-            return
+        self.sync_rows(
+            self.table_config.charts,
+            charts,
+            ["_acubed_chart_id"],
+            "Charts",
+        )
 
-        frame = self._frame(charts)
-
-        exists = self.storage.table_exists(self.table_config.charts)
-
-        if exists:
-            self.storage.upsert_table(
-                self.table_config.charts,
-                frame.to_native(),
-                ["song_id"],
-            )
-        else:
-            self.storage.overwrite_table(
-                self.table_config.charts,
-                frame.to_native(),
-            )
-
-        self.logger.info("Charts synced: %s rows", self._row_count(frame))
+    def sync_source(self, source: list[dict]):
+        self.sync_rows(
+            self.table_config.source,
+            source,
+            ["_acubed_source_id"],
+            "Source",
+        )
 
 
-class NotesRepository(_BaseRepository):
-    def sync_notes(self, notes: list[dict]):
-        if not notes:
-            self.logger.info("No notes to sync")
-            return
+class ChartsRepository(BronzeRepository):
+    pass
 
-        frame = self._frame(notes)
 
-        exists = self.storage.table_exists(self.table_config.notes)
-
-        if exists:
-            self.storage.upsert_table(
-                self.table_config.notes,
-                frame.to_native(),
-                ["song_id", "note_id"],
-            )
-        else:
-            self.storage.overwrite_table(
-                self.table_config.notes,
-                frame.to_native(),
-            )
-
-        self.logger.info("Notes synced: %s rows", self._row_count(frame))
+# Silver writes are disabled while bronze chart tables are being built.
+# class NotesRepository(_BaseRepository):
+#     def sync_notes(self, notes: list[dict]):
+#         if not notes:
+#             self.logger.info("No notes to sync")
+#             return
+#
+#         frame = self._frame(notes)
+#
+#         exists = self.storage.table_exists(self.table_config.notes)
+#
+#         if exists:
+#             self.storage.upsert_table(
+#                 self.table_config.notes,
+#                 frame.to_native(),
+#                 ["song_id", "note_id"],
+#             )
+#         else:
+#             self.storage.overwrite_table(
+#                 self.table_config.notes,
+#                 frame.to_native(),
+#             )
+#
+#         self.logger.info("Notes synced: %s rows", self._row_count(frame))
 
 
 class DatabricksStepfileRepository:
@@ -164,8 +229,11 @@ class DatabricksStepfileRepository:
         self.workers = int(os.getenv("ACUBED_DATABRICKS_WORKERS", workers))
 
         required_methods = (
-            "distributed_stepfiles_to_tables",
-            "sync_ingestion_tables",
+            # "distributed_api_assets_to_bronze_tables",
+            # Parsing is disabled while bronze chart tables are being built.
+            # "distributed_stepfiles_to_tables",
+            "sync_delta_table",
+            # "sync_ingestion_tables",
             "optimize_tables",
         )
         missing = [
@@ -179,53 +247,127 @@ class DatabricksStepfileRepository:
                 f"methods: {', '.join(missing)}"
             )
 
-    def sync_stepfiles(self, stepfiles) -> dict[str, float]:
+    def sync_bronze_tables(
+        self,
+        collections: list[dict],
+        charts: list[dict],
+        source: list[dict],
+        optimize: bool = True,
+    ) -> None:
+        if collections:
+            collections = self._dedupe_rows(
+                collections,
+                ["_acubed_collection_id"],
+            )
+            self.storage.sync_delta_table(
+                self.table_config.collections,
+                collections,
+                key_columns=("_acubed_collection_id",),
+            )
+            self.logger.info("Collections synced: %s rows", len(collections))
+
+        if charts:
+            charts = self._dedupe_rows(charts, ["_acubed_chart_id"])
+            self.storage.sync_delta_table(
+                self.table_config.charts,
+                charts,
+                key_columns=("_acubed_chart_id",),
+            )
+            self.logger.info("Charts synced: %s rows", len(charts))
+
+        if source:
+            source = self._dedupe_rows(source, ["_acubed_source_id"])
+            self.storage.sync_delta_table(
+                self.table_config.source,
+                source,
+                key_columns=("_acubed_source_id",),
+            )
+            self.logger.info("Source synced: %s rows", len(source))
+
+        if optimize:
+            self.storage.optimize_tables(
+                (
+                    self.table_config.collections,
+                    self.table_config.charts,
+                    self.table_config.source,
+                )
+            )
+
+    def _dedupe_rows(
+        self,
+        rows: list[dict],
+        key_columns: list[str],
+    ) -> list[dict]:
+        deduped = {}
+        for row in rows:
+            key = tuple(row.get(column) for column in key_columns)
+            deduped[key] = row
+
+        return list(deduped.values())
+
+    def sync_assets(
+        self,
+        assets,
+        optimize: bool = True,
+    ) -> dict[str, float]:
         self.logger.info("=" * 80)
-        self.logger.info("OPTIMIZED INGESTION PIPELINE - SPARK NATIVE")
+        self.logger.info("BRONZE API INGESTION PIPELINE - SPARK NATIVE")
         self.logger.info("=" * 80)
         self.logger.info("Workers: %s", self.workers)
 
         transform_start = time.time()
-        frames = self.storage.distributed_stepfiles_to_tables(
-            stepfiles,
+        frames = self.storage.distributed_api_assets_to_bronze_tables(
+            assets,
             self.workers,
         )
         transform_elapsed = time.time() - transform_start
 
         self.logger.info(
-            "Transformed in %.2fs (distributed)",
+            "Transformed API assets in %.2fs (distributed)",
             transform_elapsed,
         )
-        self.logger.info("Charts: %s rows", f"{frames.charts_count:,}")
-        self.logger.info("Notes: %s rows", f"{frames.notes_count:,}")
+        self.logger.info("Bronze charts: %s rows", f"{frames.charts_count:,}")
 
         load_start = time.time()
         try:
-            actions = self.storage.sync_ingestion_tables(
-                self.table_config,
-                frames,
-            )
+            actions = {
+                self.table_config.charts: self.storage.sync_delta_table(
+                    self.table_config.charts,
+                    frames.charts,
+                    key_columns=("_acubed_chart_id",),
+                )
+            }
+            if frames.source is not None:
+                actions[self.table_config.source] = (
+                    self.storage.sync_delta_table(
+                        self.table_config.source,
+                        frames.source,
+                        key_columns=("_acubed_source_id",),
+                    )
+                )
             load_elapsed = time.time() - load_start
             self.logger.info("Loaded tables in %.2fs", load_elapsed)
 
             for table_name, action in actions.items():
                 self.logger.info("%s %s", action.title(), table_name)
 
-            optimize_start = time.time()
-            self.logger.info("Optimizing Delta tables")
-            self.storage.optimize_tables(
-                (self.table_config.charts, self.table_config.notes)
-            )
-            optimize_elapsed = time.time() - optimize_start
-            self.logger.info(
-                "Optimization complete in %.2fs",
-                optimize_elapsed,
-            )
+            optimize_elapsed = 0.0
+            if optimize:
+                optimize_start = time.time()
+                self.logger.info("Optimizing bronze Delta tables")
+                self.storage.optimize_tables(
+                    (self.table_config.charts, self.table_config.source)
+                )
+                optimize_elapsed = time.time() - optimize_start
+                self.logger.info(
+                    "Optimization complete in %.2fs",
+                    optimize_elapsed,
+                )
         finally:
             frames.unpersist()
 
         self.logger.info("=" * 80)
-        self.logger.info("DATABRICKS PHASES")
+        self.logger.info("DATABRICKS BRONZE PHASES")
         self.logger.info("  Transform: %.2fs (distributed)", transform_elapsed)
         self.logger.info("  Load:      %.2fs", load_elapsed)
         self.logger.info("  Optimize:  %.2fs", optimize_elapsed)
@@ -236,6 +378,71 @@ class DatabricksStepfileRepository:
             "load": load_elapsed,
             "optimize": optimize_elapsed,
         }
+
+    # API parsing is disabled while bronze chart tables are being built.
+    # def sync_stepfiles(self, stepfiles) -> dict[str, float]:
+    #     self.logger.info("=" * 80)
+    #     self.logger.info("OPTIMIZED INGESTION PIPELINE - SPARK NATIVE")
+    #     self.logger.info("=" * 80)
+    #     self.logger.info("Workers: %s", self.workers)
+    #
+    #     transform_start = time.time()
+    #     frames = self.storage.distributed_stepfiles_to_tables(
+    #         stepfiles,
+    #         self.workers,
+    #     )
+    #     transform_elapsed = time.time() - transform_start
+    #
+    #     self.logger.info(
+    #         "Transformed in %.2fs (distributed)",
+    #         transform_elapsed,
+    #     )
+    #     self.logger.info("Charts: %s rows", f"{frames.charts_count:,}")
+    #     self.logger.info("Notes: %s rows", f"{frames.notes_count:,}")
+    #
+    #     load_start = time.time()
+    #     try:
+    #         actions = self.storage.sync_ingestion_tables(
+    #             self.table_config,
+    #             frames,
+    #         )
+    #         load_elapsed = time.time() - load_start
+    #         self.logger.info("Loaded tables in %.2fs", load_elapsed)
+    #
+    #         for table_name, action in actions.items():
+    #             self.logger.info("%s %s", action.title(), table_name)
+    #
+    #         optimize_start = time.time()
+    #         self.logger.info("Optimizing Delta tables")
+    #         self.storage.optimize_tables(
+    #             (
+    #                 self.table_config.charts,
+    #                 # Silver optimization is disabled while bronze chart
+    #                 # tables are being built.
+    #                 # self.table_config.notes,
+    #             )
+    #         )
+    #         optimize_elapsed = time.time() - optimize_start
+    #         self.logger.info(
+    #             "Optimization complete in %.2fs",
+    #             optimize_elapsed,
+    #         )
+    #     finally:
+    #         frames.unpersist()
+    #
+    #     self.logger.info("=" * 80)
+    #     self.logger.info("DATABRICKS PHASES")
+    #     self.logger.info("  Transform: %.2fs (distributed)",
+    #         transform_elapsed)
+    #     self.logger.info("  Load:      %.2fs", load_elapsed)
+    #     self.logger.info("  Optimize:  %.2fs", optimize_elapsed)
+    #     self.logger.info("=" * 80)
+    #
+    #     return {
+    #         "transform": transform_elapsed,
+    #         "load": load_elapsed,
+    #         "optimize": optimize_elapsed,
+    #     }
 
 
 # # =========================================================

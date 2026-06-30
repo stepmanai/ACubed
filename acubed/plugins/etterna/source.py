@@ -16,6 +16,8 @@ class EtternaRemoteSource(ChartSource):
     def __init__(self, config: EtternaConfig):
         self.config = config
         self._client: httpx.AsyncClient | None = None
+        self._mapset_cache: dict[str, str] = {}
+        self._mapset_payload_cache: dict[str, dict] = {}
 
     # -------------------------
     # client lifecycle
@@ -45,6 +47,12 @@ class EtternaRemoteSource(ChartSource):
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    def resolve_pack_name(self, pack_id: str) -> str:
+        return self._mapset_cache.get(pack_id, f"Etterna Mapset {pack_id}")
+
+    def resolve_pack_payload(self, pack_id: str):
+        return self._mapset_payload_cache.get(pack_id)
 
     # -------------------------
     # request helpers
@@ -113,6 +121,7 @@ class EtternaRemoteSource(ChartSource):
         data = await self._request_json(client, url)
 
         mapset = data["mapset"]
+        self._mapset_payload_cache[pack_id] = data
 
         # SINGLE SOURCE OF TRUTH UPDATE
         self._mapset_cache[pack_id] = mapset.get(
@@ -126,6 +135,7 @@ class EtternaRemoteSource(ChartSource):
                 title=m["title"],
                 artist=m["artist"],
                 pack_id=pack_id,
+                raw_payload=m,
             )
             for m in mapset["maps"]
         ]
@@ -169,6 +179,7 @@ class EtternaRemoteSource(ChartSource):
                 return AssetResponse(
                     metadata=info,
                     raw_chart=chart_bytes,
+                    raw_payload={**info, "chart": chart_bytes},
                 )
 
             except (TimeoutError, httpx.HTTPError, ValueError):

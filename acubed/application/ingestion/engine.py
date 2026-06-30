@@ -5,9 +5,12 @@ import time
 
 from tqdm import tqdm
 
-from acubed.domain.chart.types import AssetResponse, ChartRef, Pack, Stepfile
+from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.definition import GameDefinition
 from acubed.infrastructure.logging import get_logger
+
+AssetResult = tuple[ChartRef, AssetResponse]
+BronzeEvent = tuple[str, list[Pack] | list[ChartRef] | list[AssetResult]]
 
 
 class GameIngestionEngine:
@@ -59,7 +62,7 @@ class GameIngestionEngine:
     async def _fetch_assets(
         self,
         charts: list[ChartRef],
-    ) -> list[tuple[ChartRef, AssetResponse]]:
+    ) -> list[AssetResult]:
         source = self.game.source
         fetch_many = getattr(source, "fetch_many", None)
 
@@ -79,7 +82,7 @@ class GameIngestionEngine:
                 return chart, result
 
         tasks = [fetch_chart(chart) for chart in charts]
-        results: list[tuple[ChartRef, AssetResponse]] = []
+        results: list[AssetResult] = []
 
         for coro in tqdm(
             asyncio.as_completed(tasks),
@@ -91,42 +94,91 @@ class GameIngestionEngine:
 
         return results
 
-    async def _parse_assets(
+    async def _stream_assets(
         self,
-        assets: list[tuple[ChartRef, AssetResponse]],
-    ) -> list[Stepfile]:
+        charts: list[ChartRef],
+    ):
+        source = self.game.source
         sem = asyncio.Semaphore(self.concurrency)
 
-        async def parse_asset(asset: tuple[ChartRef, AssetResponse]):
-            _, response = asset
+        async def fetch_chart(chart: ChartRef):
             async with sem:
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(
-                    None,
-                    self.game.parser.parse,
-                    response,
-                )
+                result = await source.fetch_assets(chart.id, self.secrets)
+                return chart, result
 
-        tasks = [asyncio.create_task(parse_asset(asset)) for asset in assets]
-        stepfiles: list[Stepfile] = []
+        tasks = [asyncio.create_task(fetch_chart(chart)) for chart in charts]
 
         try:
             for task in tqdm(
                 asyncio.as_completed(tasks),
                 total=len(tasks),
-                desc="Parse",
+                desc="Charts",
                 unit="chart",
             ):
-                stepfiles.append(await task)
+                yield await task
         except Exception:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
-        return stepfiles
+    # API parsing is disabled while bronze chart tables are being
+    # built.
+    # async def _parse_assets(
+    #     self,
+    #     assets: list[tuple[ChartRef, AssetResponse]],
+    # ) -> list[Stepfile]:
+    #     sem = asyncio.Semaphore(self.concurrency)
+    #
+    #     async def parse_asset(asset: tuple[ChartRef, AssetResponse]):
+    #         chart, response = asset
+    #         async with sem:
+    #             loop = asyncio.get_running_loop()
+    #             stepfile = await loop.run_in_executor(
+    #                 None,
+    #                 self.game.parser.parse,
+    #                 response,
+    #             )
+    #             stepfile.source_chart_id = chart.id
+    #             stepfile.raw_api_payload = _response_payload(response)
+    #             return stepfile
+    #
+    #     tasks = [asyncio.create_task(parse_asset(asset)) for asset in assets]
+    #     stepfiles: list[Stepfile] = []
+    #
+    #     try:
+    #         for task in tqdm(
+    #             asyncio.as_completed(tasks),
+    #             total=len(tasks),
+    #             desc="Parse",
+    #             unit="chart",
+    #         ):
+    #             stepfiles.append(await task)
+    #     except Exception:
+    #         for task in tasks:
+    #             task.cancel()
+    #         await asyncio.gather(*tasks, return_exceptions=True)
+    #         raise
+    #
+    #     return stepfiles
 
-    async def run(self) -> list[Stepfile]:
+    def _collection_rows_for_packs(self, packs: list[Pack]) -> list[Pack]:
+        source = self.game.source
+        resolver = getattr(source, "resolve_pack_payload", None)
+
+        if not callable(resolver):
+            return packs
+
+        return [
+            Pack(
+                id=pack.id,
+                name=pack.name,
+                raw_payload=resolver(pack.id) or pack.raw_payload,
+            )
+            for pack in packs
+        ]
+
+    async def stream(self):
         self.logger.info("Starting %s ingestion pipeline", self.game.name)
 
         source = self.game.source
@@ -139,6 +191,7 @@ class GameIngestionEngine:
                 len(packs),
                 time.perf_counter() - phase_start,
             )
+            yield "collections", self._collection_rows_for_packs(packs)
 
             phase_start = time.perf_counter()
             charts = await self._fetch_charts_for_packs(packs)
@@ -148,26 +201,40 @@ class GameIngestionEngine:
                 len(charts),
                 time.perf_counter() - phase_start,
             )
+            yield "collections", self._collection_rows_for_packs(packs)
+            yield "chart_refs", charts
 
             phase_start = time.perf_counter()
-            assets = await self._fetch_assets(charts)
+            downloaded = 0
+            async for asset in self._stream_assets(charts):
+                downloaded += 1
+                yield "assets", [asset]
+
             self.logger.info(
                 "Downloaded %d chart asset(s) in %.2fs",
-                len(assets),
+                downloaded,
                 time.perf_counter() - phase_start,
             )
 
-            phase_start = time.perf_counter()
-            stepfiles = await self._parse_assets(assets)
-            self.logger.info(
-                "Parsed %d stepfile(s) in %.2fs",
-                len(stepfiles),
-                time.perf_counter() - phase_start,
-            )
+            # API parsing is disabled while bronze chart tables are being
+            # built.
+            # phase_start = time.perf_counter()
+            # stepfiles = await self._parse_assets(assets)
+            # self.logger.info(
+            #     "Parsed %d stepfile(s) in %.2fs",
+            #     len(stepfiles),
+            #     time.perf_counter() - phase_start,
+            # )
 
         finally:
             await source.close()
 
         self.logger.info("%s ingestion complete", self.game.name)
 
-        return stepfiles
+    async def run(self) -> list[AssetResult]:
+        assets: list[AssetResult] = []
+        async for event_type, payload in self.stream():
+            if event_type == "assets":
+                assets.extend(payload)
+
+        return assets

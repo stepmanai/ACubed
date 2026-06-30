@@ -25,6 +25,7 @@ class QuaverRemoteSource(ChartSource):
 
         # pack_id -> title cache (lazy hydration store)
         self._mapset_cache: dict[str, str] = {}
+        self._mapset_payload_cache: dict[str, dict] = {}
 
     # -------------------------
     # client lifecycle
@@ -136,6 +137,9 @@ class QuaverRemoteSource(ChartSource):
         """
         return self._mapset_cache.get(pack_id, f"Quaver Mapset {pack_id}")
 
+    def resolve_pack_payload(self, pack_id: str):
+        return self._mapset_payload_cache.get(pack_id)
+
     async def _hydrate_mapset(
         self, client: httpx.AsyncClient, pack_id: str
     ) -> str:
@@ -182,6 +186,7 @@ class QuaverRemoteSource(ChartSource):
         data = await self._request_json(client, url)
 
         mapset = data["mapset"]
+        self._mapset_payload_cache[pack_id] = data
 
         # SINGLE SOURCE OF TRUTH UPDATE
         self._mapset_cache[pack_id] = mapset.get(
@@ -195,6 +200,7 @@ class QuaverRemoteSource(ChartSource):
                 title=m["title"],
                 artist=m["artist"],
                 pack_id=pack_id,
+                raw_payload=m,
             )
             for m in mapset["maps"]
         ]
@@ -246,6 +252,7 @@ class QuaverRemoteSource(ChartSource):
                 return AssetResponse(
                     metadata=info,
                     raw_chart=chart_bytes,
+                    raw_payload={**info, "chart": chart_bytes},
                 )
 
             except (TimeoutError, httpx.HTTPError, ValueError):
