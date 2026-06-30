@@ -16,7 +16,7 @@ def build_runtime_config(
     environment: Environment | None = None,
 ) -> RuntimeConfig:
     """Build runtime configuration with environment-aware defaults.
-    
+
     Databricks Serverless benefits from higher parallelism (16 workers),
     while local development uses lower parallelism (4 workers).
     """
@@ -26,7 +26,7 @@ def build_runtime_config(
     default_workers = (
         16 if environment and is_databricks_environment(environment) else 4
     )
-    
+
     return RuntimeConfig(
         game=game_override or os.getenv("GAME", "ffr"),
         thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", default_workers)),

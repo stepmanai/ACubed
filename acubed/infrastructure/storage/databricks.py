@@ -254,17 +254,17 @@ class DatabricksStorage(BaseStorage):
         # OPTIMIZATION: Increase parallelism for serverless compute
         # Use more slices for better distribution across serverless workers
         optimal_slices = max(len(assets) // 10, workers * 4, 1)
-        
+
         assets_rdd = self.spark.sparkContext.parallelize(
             assets,
             numSlices=optimal_slices,
         )
-        
+
         # OPTIMIZATION: Process both charts and source in single pass
         # to avoid re-scanning the RDD
         charts_rdd = assets_rdd.flatMap(_api_asset_to_bronze)
         source_rdd = assets_rdd.flatMap(_api_asset_to_bronze_source)
-        
+
         charts = self._dataframe_from_rdd(
             charts_rdd,
             (
@@ -275,7 +275,7 @@ class DatabricksStorage(BaseStorage):
                 "api_payload",
             ),
         ).cache()
-        
+
         source = self._dataframe_from_rdd(
             source_rdd,
             (
