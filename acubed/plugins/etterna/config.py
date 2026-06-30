@@ -7,4 +7,4 @@ from acubed.domain.game.protocols import GameConfig
 
 @dataclass(frozen=True)
 class EtternaConfig(GameConfig):
-    base_api_url: str = "https://api.etternaonline.com/api/"
+    base_api_url: str = "https://api.etternaonline.com/api"
