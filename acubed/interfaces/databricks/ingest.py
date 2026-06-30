@@ -11,7 +11,9 @@ if __name__ == "__main__":
     package_root = Path.cwd().parent.parent.parent
 
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-e", str(package_root)]
+        [sys.executable, "-m", "pip", "install", "-e", str(package_root)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     nest_asyncio.apply()

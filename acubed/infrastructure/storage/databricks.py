@@ -251,12 +251,20 @@ class DatabricksStorage(BaseStorage):
                 _cached_frames=(),
             )
 
+        # OPTIMIZATION: Increase parallelism for serverless compute
+        # Use more slices for better distribution across serverless workers
+        optimal_slices = max(len(assets) // 10, workers * 4, 1)
+        
         assets_rdd = self.spark.sparkContext.parallelize(
             assets,
-            numSlices=max(workers, 1),
+            numSlices=optimal_slices,
         )
+        
+        # OPTIMIZATION: Process both charts and source in single pass
+        # to avoid re-scanning the RDD
         charts_rdd = assets_rdd.flatMap(_api_asset_to_bronze)
         source_rdd = assets_rdd.flatMap(_api_asset_to_bronze_source)
+        
         charts = self._dataframe_from_rdd(
             charts_rdd,
             (
@@ -267,6 +275,7 @@ class DatabricksStorage(BaseStorage):
                 "api_payload",
             ),
         ).cache()
+        
         source = self._dataframe_from_rdd(
             source_rdd,
             (
@@ -277,11 +286,16 @@ class DatabricksStorage(BaseStorage):
             ),
         ).cache()
 
+        # OPTIMIZATION: Trigger count() to cache dataframes before returning
+        # This ensures data is materialized in cache before MERGE operations
+        charts_count = charts.count()
+        source_count = source.count()
+
         return DatabricksTableFrames(
             charts=charts,
             source=source,
-            charts_count=charts.count(),
-            source_count=source.count(),
+            charts_count=charts_count,
+            source_count=source_count,
             _cached_frames=(charts, source),
         )
 
@@ -316,6 +330,15 @@ class DatabricksStorage(BaseStorage):
         qualified = self._get_qualified_name(table_name)
         spark_df = self._ensure_spark_dataframe(dataframe)
         temp_view = f"_acubed_upsert_{abs(hash(qualified))}"
+
+        # OPTIMIZATION: Coalesce small batches to reduce shuffle overhead
+        # For batches < 1000 rows, use single partition to avoid shuffle
+        row_count = spark_df.count()
+        if row_count < 1000:
+            spark_df = spark_df.coalesce(1)
+        elif row_count < 10000:
+            # For medium batches, use limited partitions
+            spark_df = spark_df.coalesce(min(row_count // 500, 20))
 
         spark_df.createOrReplaceTempView(temp_view)
 

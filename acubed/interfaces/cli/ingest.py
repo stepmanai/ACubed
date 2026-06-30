@@ -24,7 +24,18 @@ from acubed.utils import (
 
 
 def _bronze_batch_size() -> int:
-    return max(int(os.getenv("BRONZE_BATCH_SIZE", 100)), 1)
+    """Get batch size with environment-aware defaults.
+    
+    Databricks Serverless benefits from larger batches (fewer Delta writes),
+    while local development uses smaller batches for faster feedback.
+    """
+    from acubed.infrastructure.environment.detection import detect_environment
+    
+    env = detect_environment()
+    # Databricks: 1000 (10x larger for fewer MERGE operations)
+    # Local: 100 (faster feedback, lower memory)
+    default = 1000 if is_databricks_environment(env) else 100
+    return max(int(os.getenv("BRONZE_BATCH_SIZE", default)), 1)
 
 
 async def async_main(game_id: str | None = None) -> None:
@@ -68,6 +79,9 @@ async def async_main(game_id: str | None = None) -> None:
     storage = app.storage
     table_config = app.table_config
     batch_size = _bronze_batch_size()
+    
+    # Log the batch size being used for visibility
+    logger.info("Bronze batch size: %d", batch_size)
 
     if is_databricks_environment(app.environment):
         repository = DatabricksStepfileRepository(
