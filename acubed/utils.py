@@ -94,6 +94,20 @@ def _json_payload(value: Any) -> str:
     )
 
 
+def _difficulty_value(raw_payload: Any) -> float | None:
+    if not isinstance(raw_payload, dict):
+        return None
+
+    value = raw_payload.get("difficulty")
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def packs_to_bronze_tables(packs: list[Pack]) -> ETLResult:
     collections = [
         {
@@ -117,9 +131,25 @@ def chart_refs_to_bronze_tables(charts: list[ChartRef]) -> ETLResult:
     chart_rows = [
         {
             "_acubed_chart_id": chart.id,
+            "_acubed_song_id": (
+                chart.raw_payload.get("_acubed_song_id")
+                if isinstance(chart.raw_payload, dict)
+                else None
+            ),
             "_acubed_collection_id": chart.pack_id,
             "chart_title": chart.title,
             "chart_artist": chart.artist,
+            "difficulty_name": (
+                chart.raw_payload.get("difficulty_name")
+                if isinstance(chart.raw_payload, dict)
+                else None
+            ),
+            "difficulty": _difficulty_value(chart.raw_payload),
+            "keys": (
+                chart.raw_payload.get("keys")
+                if isinstance(chart.raw_payload, dict)
+                else None
+            ),
             "api_payload": _json_payload(
                 _strip_chart_data(
                     chart.raw_payload
@@ -158,9 +188,25 @@ def api_assets_to_bronze_tables(
     charts = [
         {
             "_acubed_chart_id": chart.id,
+            "_acubed_song_id": (
+                chart.raw_payload.get("_acubed_song_id")
+                if isinstance(chart.raw_payload, dict)
+                else None
+            ),
             "_acubed_collection_id": chart.pack_id,
             "chart_title": chart.title,
             "chart_artist": chart.artist,
+            "difficulty_name": (
+                chart.raw_payload.get("difficulty_name")
+                if isinstance(chart.raw_payload, dict)
+                else None
+            ),
+            "difficulty": _difficulty_value(chart.raw_payload),
+            "keys": (
+                chart.raw_payload.get("keys")
+                if isinstance(chart.raw_payload, dict)
+                else None
+            ),
             "api_payload": _json_payload(
                 {
                     "chart_ref": _strip_chart_data(

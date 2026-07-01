@@ -138,12 +138,15 @@ class DatabricksStorage(BaseStorage):
             "hold_duration": DoubleType(),
             "difficulty": DoubleType(),
             "_acubed_chart_id": StringType(),
+            "_acubed_song_id": StringType(),
             "_acubed_collection_id": StringType(),
             "_acubed_source_id": StringType(),
             "api_payload": StringType(),
             "chart_title": StringType(),
             "chart_artist": StringType(),
             "chart_base64": StringType(),
+            "difficulty_name": StringType(),
+            "keys": LongType(),
         }
 
         return self.spark.createDataFrame(
@@ -229,9 +232,13 @@ class DatabricksStorage(BaseStorage):
             charts = self._empty_dataframe(
                 (
                     "_acubed_chart_id",
+                    "_acubed_song_id",
                     "_acubed_collection_id",
                     "chart_title",
                     "chart_artist",
+                    "difficulty_name",
+                    "difficulty",
+                    "keys",
                     "api_payload",
                 )
             )
@@ -269,9 +276,13 @@ class DatabricksStorage(BaseStorage):
             charts_rdd,
             (
                 "_acubed_chart_id",
+                "_acubed_song_id",
                 "_acubed_collection_id",
                 "chart_title",
                 "chart_artist",
+                "difficulty_name",
+                "difficulty",
+                "keys",
                 "api_payload",
             ),
         ).cache()

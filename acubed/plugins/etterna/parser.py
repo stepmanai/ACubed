@@ -1,4 +1,4 @@
-# plugins/ffr/parser.py
+# plugins/etterna/parser.py
 
 from __future__ import annotations
 

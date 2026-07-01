@@ -64,6 +64,13 @@ class GameIngestionEngine:
         charts: list[ChartRef],
     ) -> list[AssetResult]:
         source = self.game.source
+        if getattr(source, "supports_assets", True) is False:
+            self.logger.info(
+                "%s source does not provide API assets; skipping asset phase",
+                self.game.name,
+            )
+            return []
+
         fetch_many = getattr(source, "fetch_many", None)
 
         if callable(fetch_many):
@@ -99,6 +106,13 @@ class GameIngestionEngine:
         charts: list[ChartRef],
     ):
         source = self.game.source
+        if getattr(source, "supports_assets", True) is False:
+            self.logger.info(
+                "%s source does not provide API assets; skipping asset phase",
+                self.game.name,
+            )
+            return
+
         sem = asyncio.Semaphore(self.concurrency)
 
         async def fetch_chart(chart: ChartRef):

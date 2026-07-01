@@ -1,4 +1,4 @@
-# plugins/ffr/config.py
+# plugins/etterna/config.py
 
 from dataclasses import dataclass
 
