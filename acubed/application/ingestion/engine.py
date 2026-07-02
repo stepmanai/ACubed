@@ -113,6 +113,21 @@ class GameIngestionEngine:
             )
             return
 
+        stream_many = getattr(source, "stream_many", None)
+        if callable(stream_many):
+            progress = tqdm(total=len(charts), desc="Charts", unit="chart")
+            try:
+                async for batch in stream_many(
+                    charts,
+                    self.secrets,
+                    concurrency=self.concurrency,
+                ):
+                    progress.update(len(batch))
+                    yield batch
+            finally:
+                progress.close()
+            return
+
         sem = asyncio.Semaphore(self.concurrency)
 
         async def fetch_chart(chart: ChartRef):
@@ -129,7 +144,7 @@ class GameIngestionEngine:
                 desc="Charts",
                 unit="chart",
             ):
-                yield await task
+                yield [await task]
         except Exception:
             for task in tasks:
                 task.cancel()
@@ -220,9 +235,9 @@ class GameIngestionEngine:
 
             phase_start = time.perf_counter()
             downloaded = 0
-            async for asset in self._stream_assets(charts):
-                downloaded += 1
-                yield "assets", [asset]
+            async for assets in self._stream_assets(charts):
+                downloaded += len(assets)
+                yield "assets", assets
 
             self.logger.info(
                 "Downloaded %d chart asset(s) in %.2fs",
