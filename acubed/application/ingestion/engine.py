@@ -19,10 +19,12 @@ class GameIngestionEngine:
         game: GameDefinition,
         secrets: dict[str, str] | None = None,
         concurrency: int = 8,
+        skip_source_ids: set[str] | None = None,
     ):
         self.game = game
         self.secrets = secrets or {}
         self.concurrency = concurrency
+        self.skip_source_ids = skip_source_ids or set()
         self.logger = get_logger()
 
     async def _fetch_charts_for_packs(
@@ -30,6 +32,17 @@ class GameIngestionEngine:
         packs: list[Pack],
     ) -> list[ChartRef]:
         source = self.game.source
+        fetch_charts_for_packs = getattr(
+            source, "fetch_charts_for_packs", None
+        )
+        if callable(fetch_charts_for_packs):
+            return list(
+                await fetch_charts_for_packs(
+                    packs,
+                    concurrency=self.concurrency,
+                )
+            )
+
         sem = asyncio.Semaphore(self.concurrency)
         charts: list[ChartRef] = []
 
@@ -112,6 +125,25 @@ class GameIngestionEngine:
                 self.game.name,
             )
             return
+
+        if self.skip_source_ids:
+            original_count = len(charts)
+            charts = [
+                chart
+                for chart in charts
+                if str(chart.id) not in self.skip_source_ids
+            ]
+            skipped_count = original_count - len(charts)
+
+            if skipped_count:
+                self.logger.info(
+                    "Skipping %d chart asset(s) with existing source rows",
+                    skipped_count,
+                )
+
+            if not charts:
+                self.logger.info("No chart assets remain after source skip")
+                return
 
         stream_many = getattr(source, "stream_many", None)
         if callable(stream_many):

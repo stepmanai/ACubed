@@ -24,7 +24,7 @@ from acubed.utils import (
 )
 
 
-def _bronze_batch_size() -> int:
+def _bronze_batch_size(game_id: str) -> int:
     """Get batch size with environment-aware defaults.
 
     Databricks Serverless benefits from larger batches (fewer Delta writes),
@@ -33,14 +33,105 @@ def _bronze_batch_size() -> int:
     from acubed.infrastructure.environment.detection import detect_environment
 
     env = detect_environment()
-    # Databricks: 1000 (10x larger for fewer MERGE operations)
-    # Local: 100 (faster feedback, lower memory)
-    default = 1000 if is_databricks_environment(env) else 100
+    high_volume_sources = {"etterna", "osumania"}
+    if game_id in high_volume_sources:
+        default = 5000 if is_databricks_environment(env) else 1000
+    else:
+        # Databricks: 1000 (10x larger for fewer MERGE operations)
+        # Local: 100 (faster feedback, lower memory)
+        default = 1000 if is_databricks_environment(env) else 100
+
     return max(int(os.getenv("BRONZE_BATCH_SIZE", default)), 1)
 
 
 def _heartbeat_interval() -> float:
     return max(float(os.getenv("ACUBED_HEARTBEAT_SECONDS", "30")), 0)
+
+
+def _skip_existing_source_enabled(game_id: str) -> bool:
+    game_key = game_id.upper().replace("-", "_")
+    game_value = os.getenv(f"{game_key}_SKIP_EXISTING_SOURCE")
+    global_value = os.getenv("ACUBED_SKIP_EXISTING_SOURCE")
+
+    if game_value is not None:
+        return game_value.strip().lower() not in {"0", "false", "no"}
+    if global_value is not None:
+        return global_value.strip().lower() in {"1", "true", "yes"}
+
+    return game_id in {"etterna", "osumania"}
+
+
+def _sync_asset_charts_enabled(game_id: str) -> bool:
+    game_key = game_id.upper().replace("-", "_")
+    game_value = os.getenv(f"{game_key}_SYNC_ASSET_CHARTS")
+    global_value = os.getenv("ACUBED_SYNC_ASSET_CHARTS")
+
+    if game_value is not None:
+        return game_value.strip().lower() in {"1", "true", "yes"}
+    if global_value is not None:
+        return global_value.strip().lower() in {"1", "true", "yes"}
+
+    return game_id not in {"etterna", "osumania"}
+
+
+def _stage_source_sync_enabled(game_id: str, environment) -> bool:
+    game_key = game_id.upper().replace("-", "_")
+    game_value = os.getenv(f"{game_key}_STAGE_SOURCE_SYNC")
+    global_value = os.getenv("ACUBED_STAGE_SOURCE_SYNC")
+
+    if game_value is not None:
+        return game_value.strip().lower() not in {"0", "false", "no"}
+    if global_value is not None:
+        return global_value.strip().lower() in {"1", "true", "yes"}
+
+    return game_id in {
+        "etterna",
+        "osumania",
+    } and not is_databricks_environment(environment)
+
+
+def _existing_nonempty_source_ids(storage, table_config, logger) -> set[str]:
+    table_name = table_config.source
+
+    if not storage.table_exists(table_name):
+        return set()
+
+    table = storage.read_table(table_name)
+    columns = set(getattr(table, "columns", []) or [])
+    required = {"_acubed_source_id", "chart_base64"}
+    if not required.issubset(columns):
+        logger.info(
+            "Existing source table does not have skip columns: %s",
+            ", ".join(sorted(required - columns)),
+        )
+        return set()
+
+    # DuckDB relation
+    if hasattr(table, "project") and hasattr(table, "filter"):
+        rows = (
+            table.filter("chart_base64 IS NOT NULL AND chart_base64 != ''")
+            .project("_acubed_source_id")
+            .distinct()
+            .fetchall()
+        )
+        return {str(row[0]) for row in rows if row and row[0] is not None}
+
+    # Spark DataFrame
+    if hasattr(table, "select") and hasattr(table, "where"):
+        rows = (
+            table.select("_acubed_source_id")
+            .where("chart_base64 IS NOT NULL AND chart_base64 != ''")
+            .distinct()
+            .collect()
+        )
+        return {
+            str(row["_acubed_source_id"])
+            for row in rows
+            if row["_acubed_source_id"] is not None
+        }
+
+    logger.info("Storage table type does not support existing source skips")
+    return set()
 
 
 async def async_main(game_id: str | None = None) -> None:
@@ -115,17 +206,19 @@ async def async_main(game_id: str | None = None) -> None:
             "Thread pool size: %s", app.settings.runtime.thread_pool_size
         )
 
-        engine = GameIngestionEngine(
-            game=game,
-            secrets=secrets,
-            concurrency=app.settings.runtime.thread_pool_size,
-        )
-
         storage = app.storage
         table_config = app.table_config
-        batch_size = _bronze_batch_size()
+        batch_size = _bronze_batch_size(game.id)
+        sync_asset_charts = _sync_asset_charts_enabled(game.id)
+        stage_source_sync = _stage_source_sync_enabled(
+            game.id,
+            app.environment,
+        )
+        source_staging_table = f"{table_config.source}__staging"
 
         logger.info("Bronze batch size: %d", batch_size)
+        logger.info("Sync asset chart rows: %s", sync_asset_charts)
+        logger.info("Stage source sync: %s", stage_source_sync)
 
         if is_databricks_environment(app.environment):
             repository = DatabricksStepfileRepository(
@@ -136,6 +229,31 @@ async def async_main(game_id: str | None = None) -> None:
             )
         else:
             repository = ChartsRepository(storage, table_config, logger)
+
+        if stage_source_sync and hasattr(storage, "drop_table"):
+            storage.drop_table(source_staging_table)
+
+        skip_source_ids: set[str] = set()
+        if _skip_existing_source_enabled(game.id):
+            heartbeat_state["phase"] = "checking_existing_source"
+            check_start = time.time()
+            skip_source_ids = _existing_nonempty_source_ids(
+                storage,
+                table_config,
+                logger,
+            )
+            logger.info(
+                "Found %d existing non-empty source row(s) to skip in %.2fs",
+                len(skip_source_ids),
+                time.time() - check_start,
+            )
+
+        engine = GameIngestionEngine(
+            game=game,
+            secrets=secrets,
+            concurrency=app.settings.runtime.thread_pool_size,
+            skip_source_ids=skip_source_ids,
+        )
 
         ingest_start = time.time()
         loaded_assets = 0
@@ -172,19 +290,28 @@ async def async_main(game_id: str | None = None) -> None:
             collection_etl = packs_to_bronze_tables(collection_batch)
             chart_ref_etl = chart_refs_to_bronze_tables(chart_ref_batch)
             asset_etl = api_assets_to_bronze_tables(asset_batch)
+            chart_rows = list(chart_ref_etl.charts)
+            if sync_asset_charts:
+                chart_rows.extend(asset_etl.charts)
 
             update_heartbeat("bronze_sync")
             if is_databricks_environment(app.environment):
                 repository.sync_bronze_tables(
                     collections=collection_etl.collections,
-                    charts=chart_ref_etl.charts + asset_etl.charts,
+                    charts=chart_rows,
                     source=asset_etl.source,
                     optimize=optimize,
                 )
             else:
                 repository.sync_collections(collection_etl.collections)
-                repository.sync_charts(chart_ref_etl.charts + asset_etl.charts)
-                repository.sync_source(asset_etl.source)
+                repository.sync_charts(chart_rows)
+                if stage_source_sync:
+                    repository.stage_source(
+                        source_staging_table,
+                        asset_etl.source,
+                    )
+                else:
+                    repository.sync_source(asset_etl.source)
 
             loaded_assets += len(asset_batch)
             update_heartbeat("streaming")
@@ -206,6 +333,13 @@ async def async_main(game_id: str | None = None) -> None:
                 flush_pending()
 
         flush_pending()
+
+        if stage_source_sync:
+            update_heartbeat("source_stage_merge")
+            logger.info("Merging staged source rows")
+            repository.merge_staged_source(source_staging_table)
+            if hasattr(storage, "drop_table"):
+                storage.drop_table(source_staging_table)
 
         if is_databricks_environment(app.environment) and loaded_assets:
             update_heartbeat("optimize")

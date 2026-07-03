@@ -101,6 +101,90 @@ class DuckDBStorage(BaseStorage):
 
         self.con.unregister("_acubed_dataframe")
 
+    def drop_table(
+        self,
+        table_name: str,
+    ) -> None:
+        qualified = self._qualified_name(table_name)
+        self.con.execute(f"DROP TABLE IF EXISTS {qualified}")
+
+    def append_table(
+        self,
+        table_name: str,
+        dataframe,
+    ) -> None:
+        qualified = self._qualified_name(table_name)
+
+        self.con.register(
+            "_acubed_append",
+            dataframe,
+        )
+
+        try:
+            if not self.table_exists(table_name):
+                self.con.execute(
+                    f"""
+                    CREATE TABLE {qualified}
+                    AS
+                    SELECT *
+                    FROM _acubed_append
+                    """
+                )
+                return
+
+            self.con.execute(
+                f"""
+                INSERT INTO {qualified}
+                SELECT *
+                FROM _acubed_append
+                """
+            )
+        finally:
+            self.con.unregister("_acubed_append")
+
+    def upsert_from_table(
+        self,
+        table_name: str,
+        source_table_name: str,
+        key_columns: list[str],
+    ) -> None:
+        qualified = self._qualified_name(table_name)
+        source_qualified = self._qualified_name(source_table_name)
+
+        if not self.table_exists(source_table_name):
+            return
+
+        if not self.table_exists(table_name):
+            self.con.execute(
+                f"""
+                CREATE TABLE {qualified}
+                AS
+                SELECT *
+                FROM {source_qualified}
+                """
+            )
+            return
+
+        delete_condition = " AND ".join(
+            [f"target.{col} = source.{col}" for col in key_columns]
+        )
+
+        self.con.execute(
+            f"""
+            DELETE FROM {qualified} AS target
+            USING {source_qualified} AS source
+            WHERE {delete_condition}
+            """
+        )
+
+        self.con.execute(
+            f"""
+            INSERT INTO {qualified}
+            SELECT *
+            FROM {source_qualified}
+            """
+        )
+
     def upsert_table(
         self,
         table_name: str,

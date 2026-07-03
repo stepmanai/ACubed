@@ -184,6 +184,33 @@ class BronzeRepository(_BaseRepository):
             "Source",
         )
 
+    def stage_source(self, staging_table: str, source: list[dict]):
+        if not source:
+            self.logger.info("No Source to stage")
+            return
+
+        if not hasattr(self.storage, "append_table"):
+            self.sync_source(source)
+            return
+
+        source = self._dedupe_rows(source, ["_acubed_source_id"])
+        frame = self._frame(source)
+        self.storage.append_table(staging_table, frame.to_native())
+        self.logger.info("Source staged: %s rows", self._row_count(frame))
+
+    def merge_staged_source(self, staging_table: str):
+        if not hasattr(self.storage, "upsert_from_table"):
+            return
+        if not self.storage.table_exists(staging_table):
+            return
+
+        self.storage.upsert_from_table(
+            self.table_config.source,
+            staging_table,
+            ["_acubed_source_id"],
+        )
+        self.logger.info("Staged Source merged into bronze source")
+
 
 class ChartsRepository(BronzeRepository):
     pass

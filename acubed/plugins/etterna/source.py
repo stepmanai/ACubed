@@ -23,16 +23,23 @@ from acubed.infrastructure.logging import get_logger
 from .config import EtternaConfig
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(int(os.getenv(name, default)), 1)
+    except (TypeError, ValueError):
+        return default
+
+
 class EtternaRemoteSource(ChartSource):
     supports_assets = True
 
     _MAX_RETRIES = 5
-    _DEFAULT_MAX_CONNECTIONS = 64
-    _PAGE_CONCURRENCY = 16
+    _DEFAULT_MAX_CONNECTIONS = _env_int("ETTERNA_MAX_CONNECTIONS", 64)
+    _PAGE_CONCURRENCY = _env_int("ETTERNA_PAGE_CONCURRENCY", 16)
     _PACK_PAGE_LIMIT = 5000
     _SONG_PAGE_LIMIT = 1000
-    _PACK_ASSET_CONCURRENCY = 4
-    _SM_FETCH_CONCURRENCY = 6
+    _PACK_ASSET_CONCURRENCY = _env_int("ETTERNA_PACK_ASSET_CONCURRENCY", 4)
+    _SM_FETCH_CONCURRENCY = _env_int("ETTERNA_SM_FETCH_CONCURRENCY", 6)
     _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
     _ZIP_TAIL_READ_SIZE = 65557
     _LOG_SLOW_PACK_SECONDS = 10.0
