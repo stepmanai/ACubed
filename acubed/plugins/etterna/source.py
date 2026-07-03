@@ -807,7 +807,10 @@ class EtternaRemoteSource(ChartSource):
             "encoded_pack_name": encoded_pack_name,
         }
 
-    async def fetch_packs(self) -> list[Pack]:
+    async def fetch_packs(
+        self, secrets: dict[str, str] | None = None
+    ) -> list[Pack]:
+        del secrets
         packs = []
         for pack in await self._fetch_paginated(
             "packs",
@@ -829,7 +832,10 @@ class EtternaRemoteSource(ChartSource):
 
         return packs
 
-    async def fetch_pack_charts(self, pack_id: str) -> list[ChartRef]:
+    async def fetch_pack_charts(
+        self, pack_id: str, secrets: dict[str, str] | None = None
+    ) -> list[ChartRef]:
+        del secrets
         pack_name = self.resolve_pack_name(pack_id)
         song_count = self._pack_song_count_cache.get(pack_id)
         if song_count == 0:

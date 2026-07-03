@@ -49,7 +49,9 @@ class GameIngestionEngine:
 
         async def fetch_pack(pack: Pack) -> tuple[Pack, list[ChartRef]]:
             async with sem:
-                return pack, list(await source.fetch_pack_charts(pack.id, self.secrets))
+                return pack, list(
+                    await source.fetch_pack_charts(pack.id, self.secrets)
+                )
 
         tasks = [asyncio.create_task(fetch_pack(pack)) for pack in packs]
 

@@ -120,7 +120,10 @@ class QuaverRemoteSource(ChartSource):
     # -------------------------
     # packs (NO hydration here)
     # -------------------------
-    async def fetch_packs(self) -> list[Pack]:
+    async def fetch_packs(
+        self, secrets: dict[str, str] | None = None
+    ) -> list[Pack]:
+        del secrets
         client = self._get_client()
 
         url = urljoin(self.config.base_api_url, "v1/mapsets/ranked")
@@ -140,7 +143,10 @@ class QuaverRemoteSource(ChartSource):
     # -------------------------
     # pack charts (hydration happens here)
     # -------------------------
-    async def fetch_pack_charts(self, pack_id: str) -> list[ChartRef]:
+    async def fetch_pack_charts(
+        self, pack_id: str, secrets: dict[str, str] | None = None
+    ) -> list[ChartRef]:
+        del secrets
         client = self._get_client()
 
         url = urljoin(self.config.base_api_url, f"v1/mapsets/{pack_id}")

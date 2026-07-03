@@ -244,7 +244,9 @@ class OsuManiaRemoteSource(ChartSource):
         if pack_id in self._pack_payload_cache:
             return self._pack_payload_cache[pack_id]
 
-        payload = await self._request_json(f"beatmapsets/{pack_id}", secrets=secrets)
+        payload = await self._request_json(
+            f"beatmapsets/{pack_id}", secrets=secrets
+        )
         self._pack_payload_cache[pack_id] = payload
         self._pack_cache[pack_id] = self._pack_name(payload)
         return payload

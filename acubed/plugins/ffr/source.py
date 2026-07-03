@@ -74,8 +74,10 @@ class FFRRemoteSource(ChartSource):
     # -------------------------
     # packs
     # -------------------------
-    async def fetch_packs(self) -> list[Pack]:
-
+    async def fetch_packs(
+        self, secrets: dict[str, str] | None = None
+    ) -> list[Pack]:
+        del secrets
         return [
             Pack(
                 id="ffr_default_engine",
@@ -94,7 +96,10 @@ class FFRRemoteSource(ChartSource):
     # -------------------------
     # pack charts
     # -------------------------
-    async def fetch_pack_charts(self, pack_id: str) -> list[ChartRef]:
+    async def fetch_pack_charts(
+        self, pack_id: str, secrets: dict[str, str] | None = None
+    ) -> list[ChartRef]:
+        del secrets
 
         client = self._get_client()
 

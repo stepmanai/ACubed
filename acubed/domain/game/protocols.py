@@ -13,9 +13,13 @@ class ChartParser(Protocol):
 
 
 class ChartSource(Protocol):
-    async def fetch_packs(self) -> Iterable[Pack]: ...
+    async def fetch_packs(
+        self, secrets: dict[str, str] | None = None
+    ) -> Iterable[Pack]: ...
 
-    async def fetch_pack_charts(self, pack_id: str) -> Iterable[ChartRef]: ...
+    async def fetch_pack_charts(
+        self, pack_id: str, secrets: dict[str, str] | None = None
+    ) -> Iterable[ChartRef]: ...
 
     async def fetch_assets(
         self, chart_id: str, secrets: dict[str, str] | None = None

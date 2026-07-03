@@ -14,7 +14,6 @@ from typing import Any
 from acubed.domain.chart.types import AssetResponse, ChartRef
 from acubed.domain.game.definition import GameDefinition
 from acubed.infrastructure.storage.base import BaseStorage
-from acubed.infrastructure.storage.tables import TableConfig
 from acubed.utils import api_assets_to_bronze_tables
 
 # API parsing is disabled while bronze chart tables are being built.
@@ -166,14 +165,18 @@ class DatabricksStorage(BaseStorage):
         )
 
         column_types = self._get_column_types()
-        schema = StructType([
-            StructField(
-                col,
-                column_types.get(col, StringType()),  # Default to StringType for unknown columns
-                True  # nullable
-            )
-            for col in columns
-        ])
+        schema = StructType(
+            [
+                StructField(
+                    col,
+                    column_types.get(
+                        col, StringType()
+                    ),  # Default to StringType for unknown columns
+                    True,  # nullable
+                )
+                for col in columns
+            ]
+        )
 
         return self.spark.createDataFrame(dataframe, schema=schema)
 
@@ -357,7 +360,9 @@ class DatabricksStorage(BaseStorage):
         spark_df = self._ensure_spark_dataframe(dataframe)
 
         if not self.table_exists(table_name):
-            spark_df.write.format("delta").mode("append").saveAsTable(qualified)
+            spark_df.write.format("delta").mode("append").saveAsTable(
+                qualified
+            )
             return
 
         target_columns = self.spark.table(qualified).columns
@@ -367,17 +372,18 @@ class DatabricksStorage(BaseStorage):
     def upsert_table(
         self, table_name: str, dataframe, key_columns: Sequence[str]
     ) -> None:
-        from pyspark.sql import functions as F
 
         qualified = self._get_qualified_name(table_name)
         spark_df = self._ensure_spark_dataframe(dataframe)
-        
+
         # Check if table exists first
         if not self.table_exists(table_name):
             # Table doesn't exist - create it
-            spark_df.write.format("delta").mode("overwrite").saveAsTable(qualified)
+            spark_df.write.format("delta").mode("overwrite").saveAsTable(
+                qualified
+            )
             return
-        
+
         # Table exists - perform MERGE
         target_columns = set(self.spark.table(qualified).columns)
         update_expr = {
@@ -385,13 +391,26 @@ class DatabricksStorage(BaseStorage):
             for col in spark_df.columns
             if col in target_columns
         }
-        self.spark.sql(
-            f"MERGE INTO {qualified} AS target "
-            f"USING (SELECT * FROM {spark_df.createOrReplaceTempView('_merge_source') or '_merge_source'}) AS source "
-            f"ON {' AND '.join(f'target.{col} = source.{col}' for col in key_columns)} "
-            f"WHEN MATCHED THEN UPDATE SET {', '.join(f'{col} = {expr}' for col, expr in update_expr.items())} "
-            f"WHEN NOT MATCHED THEN INSERT *"
+
+        source_view = "_merge_source"
+        spark_df.createOrReplaceTempView(source_view)
+
+        join_condition = " AND ".join(
+            f"target.{col} = source.{col}" for col in key_columns
         )
+        update_set = ", ".join(
+            f"{col} = {expr}" for col, expr in update_expr.items()
+        )
+
+        sql = f"""
+        MERGE INTO {qualified} AS target
+        USING (SELECT * FROM {source_view}) AS source
+        ON {join_condition}
+        WHEN MATCHED THEN UPDATE SET {update_set}
+        WHEN NOT MATCHED THEN INSERT *
+        """
+
+        self.spark.sql(sql)
 
     def drop_table(self, table_name: str) -> None:
         qualified = self._get_qualified_name(table_name)
@@ -403,9 +422,7 @@ class DatabricksStorage(BaseStorage):
             qualified = self._get_qualified_name(table_name)
             if self.table_exists(table_name):
                 self.spark.sql(f"OPTIMIZE {qualified}")
-                self.spark.sql(
-                    f"VACUUM {qualified} RETAIN 168 HOURS"
-                )
+                self.spark.sql(f"VACUUM {qualified} RETAIN 168 HOURS")
 
     def iter_event_rows(
         self,
@@ -414,7 +431,7 @@ class DatabricksStorage(BaseStorage):
         """Iterate over event rows from a table."""
         qualified = self._get_qualified_name(table_name)
         df = self.spark.table(qualified).orderBy("song_id", "note_id")
-        
+
         for row in df.collect():
             yield {
                 "song_id": row["song_id"],

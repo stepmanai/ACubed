@@ -69,15 +69,13 @@ def _get_dbutils() -> Any | None:
 
 
 def _get_databricks_secret(dbutils: Any, secret_ref: str) -> str | None:
-    # If secret_ref contains a slash, treat it as scope/key
     if "/" in secret_ref:
         scope, key = secret_ref.split("/", 1)
         patterns = [(scope, key)]
     else:
-        # Try multiple patterns to find the secret
         patterns = []
 
-        # Pattern 1: Extract game scope from prefix and transform remaining parts
+        # Pattern 1: Extract game from prefix and transform remaining parts
         # (e.g., FFR_API_KEY -> ffr/api-key, OSU_CLIENT_ID -> osu/client-id)
         if "_" in secret_ref:
             parts = secret_ref.split("_", 1)  # Split only on first underscore
@@ -92,13 +90,6 @@ def _get_databricks_secret(dbutils: Any, secret_ref: str) -> str | None:
         transformed_key = secret_ref.lower().replace("_", "-")
         patterns.append((default_scope, transformed_key))
 
-        # Pattern 3: Game scope with full transformed key
-        # (e.g., ffr/ffr-api-key, osu/osu-client-id)
-        if "_" in secret_ref:
-            game_scope = secret_ref.split("_")[0].lower()
-            patterns.append((game_scope, transformed_key))
-
-    # Try each pattern until one works
     for scope, key in patterns:
         try:
             value = dbutils.secrets.get(scope=scope, key=key)
