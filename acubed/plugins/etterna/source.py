@@ -16,30 +16,36 @@ from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 
 import httpx
 
+from acubed.application.ingestion.assets import empty_asset_response
+from acubed.application.ingestion.async_utils import iter_completed_tasks
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.protocols import ChartSource
+from acubed.infrastructure.environment.variables import env_int
 from acubed.infrastructure.logging import get_logger
 
 from .config import EtternaConfig
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return max(int(os.getenv(name, default)), 1)
-    except (TypeError, ValueError):
-        return default
 
 
 class EtternaRemoteSource(ChartSource):
     supports_assets = True
 
     _MAX_RETRIES = 5
-    _DEFAULT_MAX_CONNECTIONS = _env_int("ETTERNA_MAX_CONNECTIONS", 64)
-    _PAGE_CONCURRENCY = _env_int("ETTERNA_PAGE_CONCURRENCY", 16)
+    _DEFAULT_MAX_CONNECTIONS = env_int(
+        "ETTERNA_MAX_CONNECTIONS", 64, minimum=1
+    )
+    _PAGE_CONCURRENCY = env_int("ETTERNA_PAGE_CONCURRENCY", 16, minimum=1)
     _PACK_PAGE_LIMIT = 5000
     _SONG_PAGE_LIMIT = 1000
-    _PACK_ASSET_CONCURRENCY = _env_int("ETTERNA_PACK_ASSET_CONCURRENCY", 4)
-    _SM_FETCH_CONCURRENCY = _env_int("ETTERNA_SM_FETCH_CONCURRENCY", 6)
+    _PACK_ASSET_CONCURRENCY = env_int(
+        "ETTERNA_PACK_ASSET_CONCURRENCY",
+        4,
+        minimum=1,
+    )
+    _SM_FETCH_CONCURRENCY = env_int(
+        "ETTERNA_SM_FETCH_CONCURRENCY",
+        6,
+        minimum=1,
+    )
     _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
     _ZIP_TAIL_READ_SIZE = 65557
     _LOG_SLOW_PACK_SECONDS = 10.0
@@ -888,17 +894,6 @@ class EtternaRemoteSource(ChartSource):
             raw_payload={**metadata, "chart": chart},
         )
 
-    def _empty_asset_response(self, chart: ChartRef) -> AssetResponse:
-        metadata = dict(chart.raw_payload or {})
-        metadata.setdefault("id", chart.id)
-        metadata.setdefault("pack_id", chart.pack_id)
-        metadata["source_file_name"] = ""
-        return AssetResponse(
-            metadata=metadata,
-            raw_chart=b"",
-            raw_payload={**metadata, "chart": b""},
-        )
-
     async def fetch_many(
         self,
         charts: list[ChartRef],
@@ -955,9 +950,7 @@ class EtternaRemoteSource(ChartSource):
                 len(charts),
                 exc,
             )
-            return [
-                (chart, self._empty_asset_response(chart)) for chart in charts
-            ]
+            return [(chart, empty_asset_response(chart)) for chart in charts]
         finally:
             self._pack_sm_cache.pop(pack_id, None)
             for key in list(self._sm_file_cache):
@@ -1005,40 +998,15 @@ class EtternaRemoteSource(ChartSource):
                 self._PROGRESS_LOG_SECONDS,
             )
         )
-        stop_heartbeat = asyncio.Event()
-
-        async def log_heartbeat() -> None:
-            if heartbeat_seconds <= 0:
-                return
-
-            total = len(tasks)
-            while not stop_heartbeat.is_set():
-                try:
-                    await asyncio.wait_for(
-                        stop_heartbeat.wait(),
-                        timeout=heartbeat_seconds,
-                    )
-                except TimeoutError:
-                    done = sum(1 for task in tasks if task.done())
-                    pending = total - done
-                    self._logger.info(
-                        "Etterna asset extraction heartbeat: "
-                        "%d/%d pack(s) complete, %d pending",
-                        done,
-                        total,
-                        pending,
-                    )
-
-        heartbeat_task = asyncio.create_task(log_heartbeat())
-
-        try:
-            for task in asyncio.as_completed(tasks):
-                yield await task
-        except Exception:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-        finally:
-            stop_heartbeat.set()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        async for result in iter_completed_tasks(
+            tasks,
+            heartbeat_seconds=heartbeat_seconds,
+            logger=self._logger,
+            heartbeat_message=lambda done, total: (
+                "event=source_heartbeat source=etterna "
+                "action=extract_pack_assets "
+                f"completed_packs={done} total_packs={total} "
+                f"pending_packs={total - done}"
+            ),
+        ):
+            yield result

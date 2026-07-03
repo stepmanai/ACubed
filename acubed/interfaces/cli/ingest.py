@@ -16,7 +16,7 @@ from acubed.application.persistence.repository import (
 )
 from acubed.infrastructure.environment.secrets import get_required_secrets
 from acubed.infrastructure.environment.types import is_databricks_environment
-from acubed.infrastructure.logging import get_logger
+from acubed.infrastructure.logging import get_logger, log_event
 from acubed.utils import (
     api_assets_to_bronze_tables,
     chart_refs_to_bronze_tables,
@@ -100,9 +100,12 @@ def _existing_nonempty_source_ids(storage, table_config, logger) -> set[str]:
     columns = set(getattr(table, "columns", []) or [])
     required = {"_acubed_source_id", "chart_base64"}
     if not required.issubset(columns):
-        logger.info(
-            "Existing source table does not have skip columns: %s",
-            ", ".join(sorted(required - columns)),
+        log_event(
+            logger,
+            "source_skip_check",
+            status="skipped",
+            reason="missing_columns",
+            missing_columns=",".join(sorted(required - columns)),
         )
         return set()
 
@@ -130,7 +133,12 @@ def _existing_nonempty_source_ids(storage, table_config, logger) -> set[str]:
             if row["_acubed_source_id"] is not None
         }
 
-    logger.info("Storage table type does not support existing source skips")
+    log_event(
+        logger,
+        "source_skip_check",
+        status="skipped",
+        reason="unsupported_storage_table_type",
+    )
     return set()
 
 
@@ -148,10 +156,12 @@ async def async_main(game_id: str | None = None) -> None:
     heartbeat_stop = threading.Event()
     heartbeat_state = {
         "phase": "startup",
+        "action": "initialize",
         "loaded_assets": 0,
         "pending_assets": 0,
         "pending_collections": 0,
         "pending_chart_refs": 0,
+        "last_event": "none",
     }
 
     def heartbeat() -> None:
@@ -160,16 +170,17 @@ async def async_main(game_id: str | None = None) -> None:
 
         while not heartbeat_stop.wait(heartbeat_interval):
             elapsed = time.time() - start_time
-            logger.info(
-                "ACubed heartbeat: phase=%s elapsed=%.2fs "
-                "loaded_assets=%d pending_assets=%d "
-                "pending_collections=%d pending_chart_refs=%d",
-                heartbeat_state["phase"],
-                elapsed,
-                heartbeat_state["loaded_assets"],
-                heartbeat_state["pending_assets"],
-                heartbeat_state["pending_collections"],
-                heartbeat_state["pending_chart_refs"],
+            log_event(
+                logger,
+                "heartbeat",
+                phase=heartbeat_state["phase"],
+                action=heartbeat_state["action"],
+                last_event=heartbeat_state["last_event"],
+                elapsed_seconds=elapsed,
+                loaded_assets=heartbeat_state["loaded_assets"],
+                pending_assets=heartbeat_state["pending_assets"],
+                pending_collections=heartbeat_state["pending_collections"],
+                pending_chart_refs=heartbeat_state["pending_chart_refs"],
             )
 
     heartbeat_thread = threading.Thread(
@@ -179,31 +190,45 @@ async def async_main(game_id: str | None = None) -> None:
     )
     heartbeat_thread.start()
 
-    logger.info("Initializing application context")
+    log_event(
+        logger, "pipeline", status="starting", action="initialize_context"
+    )
 
     try:
         # single source of truth for config + game resolution
         app = ApplicationContext(game_override=game_id)
         game = app.runtime.game
 
-        logger.info("Environment detected: %s", app.environment)
-        logger.info("Selected game: %s (%s)", game.name, game.id)
-        logger.info("Catalog: %s", getattr(app.storage, "catalog", "N/A"))
-        logger.info("Schema: %s", getattr(app.storage, "schema", "N/A"))
+        log_event(
+            logger,
+            "runtime_config",
+            environment=app.environment,
+            game_id=game.id,
+            game_name=game.name,
+            catalog=getattr(app.storage, "catalog", "N/A"),
+            schema=getattr(app.storage, "schema", "N/A"),
+        )
 
         heartbeat_state["phase"] = "loading_secrets"
-        logger.info("Loading required secrets")
-        secrets = get_required_secrets(app.environment, game.required_secrets)
-        logger.info("Loaded %d secret(s)", len(secrets))
-
-        logger.info("Base API URL: %s", game.config.base_api_url)
-        logger.info(
-            "Request timeout: %s seconds",
-            app.settings.runtime.request_timeout,
+        heartbeat_state["action"] = "load_required_secrets"
+        log_event(
+            logger,
+            "secrets",
+            status="starting",
+            required_count=len(game.required_secrets),
         )
-        logger.info("Max retries: %s", app.settings.runtime.max_retries)
-        logger.info(
-            "Thread pool size: %s", app.settings.runtime.thread_pool_size
+        secrets = get_required_secrets(app.environment, game.required_secrets)
+        log_event(
+            logger, "secrets", status="completed", loaded_count=len(secrets)
+        )
+
+        log_event(
+            logger,
+            "ingestion_settings",
+            base_api_url=game.config.base_api_url,
+            request_timeout_seconds=app.settings.runtime.request_timeout,
+            max_retries=app.settings.runtime.max_retries,
+            thread_pool_size=app.settings.runtime.thread_pool_size,
         )
 
         storage = app.storage
@@ -216,9 +241,16 @@ async def async_main(game_id: str | None = None) -> None:
         )
         source_staging_table = f"{table_config.source}__staging"
 
-        logger.info("Bronze batch size: %d", batch_size)
-        logger.info("Sync asset chart rows: %s", sync_asset_charts)
-        logger.info("Stage source sync: %s", stage_source_sync)
+        log_event(
+            logger,
+            "bronze_settings",
+            batch_size=batch_size,
+            sync_asset_chart_rows=sync_asset_charts,
+            stage_source_sync=stage_source_sync,
+            source_staging_table=source_staging_table
+            if stage_source_sync
+            else None,
+        )
 
         if is_databricks_environment(app.environment):
             repository = DatabricksStepfileRepository(
@@ -231,21 +263,46 @@ async def async_main(game_id: str | None = None) -> None:
             repository = ChartsRepository(storage, table_config, logger)
 
         if stage_source_sync and hasattr(storage, "drop_table"):
+            heartbeat_state["phase"] = "source_stage_prepare"
+            heartbeat_state["action"] = "drop_existing_source_staging_table"
+            log_event(
+                logger,
+                "source_stage",
+                status="starting",
+                action="drop_staging_table",
+                table=source_staging_table,
+            )
             storage.drop_table(source_staging_table)
+            log_event(
+                logger,
+                "source_stage",
+                status="completed",
+                action="drop_staging_table",
+                table=source_staging_table,
+            )
 
         skip_source_ids: set[str] = set()
         if _skip_existing_source_enabled(game.id):
             heartbeat_state["phase"] = "checking_existing_source"
+            heartbeat_state["action"] = "read_existing_nonempty_source_ids"
             check_start = time.time()
+            log_event(
+                logger,
+                "source_skip_check",
+                status="starting",
+                table=table_config.source,
+            )
             skip_source_ids = _existing_nonempty_source_ids(
                 storage,
                 table_config,
                 logger,
             )
-            logger.info(
-                "Found %d existing non-empty source row(s) to skip in %.2fs",
-                len(skip_source_ids),
-                time.time() - check_start,
+            log_event(
+                logger,
+                "source_skip_check",
+                status="completed",
+                rows=len(skip_source_ids),
+                elapsed_seconds=time.time() - check_start,
             )
 
         engine = GameIngestionEngine(
@@ -261,8 +318,10 @@ async def async_main(game_id: str | None = None) -> None:
         pending_collections = []
         pending_chart_refs = []
 
-        def update_heartbeat(phase: str) -> None:
+        def update_heartbeat(phase: str, action: str | None = None) -> None:
             heartbeat_state["phase"] = phase
+            if action is not None:
+                heartbeat_state["action"] = action
             heartbeat_state["loaded_assets"] = loaded_assets
             heartbeat_state["pending_assets"] = len(pending_assets)
             heartbeat_state["pending_collections"] = len(pending_collections)
@@ -279,7 +338,7 @@ async def async_main(game_id: str | None = None) -> None:
             ):
                 return
 
-            update_heartbeat("bronze_transform")
+            update_heartbeat("bronze_transform", "transform_pending_batches")
             collection_batch = pending_collections
             chart_ref_batch = pending_chart_refs
             asset_batch = pending_assets
@@ -294,7 +353,20 @@ async def async_main(game_id: str | None = None) -> None:
             if sync_asset_charts:
                 chart_rows.extend(asset_etl.charts)
 
-            update_heartbeat("bronze_sync")
+            log_event(
+                logger,
+                "bronze_flush",
+                status="starting",
+                collections=len(collection_batch),
+                chart_refs=len(chart_ref_batch),
+                assets=len(asset_batch),
+                chart_rows=len(chart_rows),
+                source_rows=len(asset_etl.source),
+                staged_source=stage_source_sync,
+                optimize=optimize,
+            )
+
+            update_heartbeat("bronze_sync", "sync_bronze_tables")
             if is_databricks_environment(app.environment):
                 repository.sync_bronze_tables(
                     collections=collection_etl.collections,
@@ -314,11 +386,20 @@ async def async_main(game_id: str | None = None) -> None:
                     repository.sync_source(asset_etl.source)
 
             loaded_assets += len(asset_batch)
-            update_heartbeat("streaming")
-            logger.info("Bronze streamed: %d API asset(s)", loaded_assets)
+            update_heartbeat("streaming", "consume_ingestion_events")
+            log_event(
+                logger,
+                "bronze_flush",
+                status="completed",
+                loaded_assets=loaded_assets,
+                collections=len(collection_batch),
+                chart_refs=len(chart_ref_batch),
+                assets=len(asset_batch),
+            )
 
-        update_heartbeat("streaming")
+        update_heartbeat("streaming", "consume_ingestion_events")
         async for event_type, payload in engine.stream():
+            heartbeat_state["last_event"] = event_type
             if event_type == "collections":
                 pending_collections.extend(payload)
             elif event_type == "chart_refs":
@@ -326,7 +407,16 @@ async def async_main(game_id: str | None = None) -> None:
             elif event_type == "assets":
                 pending_assets.extend(payload)
 
-            update_heartbeat(f"received_{event_type}")
+            log_event(
+                logger,
+                "engine_event",
+                event_type=event_type,
+                rows=len(payload),
+                pending_collections=len(pending_collections),
+                pending_chart_refs=len(pending_chart_refs),
+                pending_assets=len(pending_assets),
+            )
+            update_heartbeat(f"received_{event_type}", f"handle_{event_type}")
             if event_type in {"collections", "chart_refs"}:
                 flush_pending()
             elif len(pending_assets) >= batch_size:
@@ -335,15 +425,30 @@ async def async_main(game_id: str | None = None) -> None:
         flush_pending()
 
         if stage_source_sync:
-            update_heartbeat("source_stage_merge")
-            logger.info("Merging staged source rows")
+            update_heartbeat("source_stage_merge", "merge_staged_source_rows")
+            log_event(
+                logger,
+                "source_stage",
+                status="starting",
+                action="merge_staged_rows",
+                table=source_staging_table,
+            )
             repository.merge_staged_source(source_staging_table)
             if hasattr(storage, "drop_table"):
                 storage.drop_table(source_staging_table)
+            log_event(
+                logger,
+                "source_stage",
+                status="completed",
+                action="merge_staged_rows",
+                table=source_staging_table,
+            )
 
         if is_databricks_environment(app.environment) and loaded_assets:
-            update_heartbeat("optimize")
-            logger.info("Optimizing bronze Delta tables")
+            update_heartbeat("optimize", "optimize_bronze_delta_tables")
+            log_event(
+                logger, "optimize", status="starting", target="bronze_tables"
+            )
             storage.optimize_tables(
                 (
                     table_config.collections,
@@ -351,15 +456,20 @@ async def async_main(game_id: str | None = None) -> None:
                     table_config.source,
                 )
             )
+            log_event(
+                logger, "optimize", status="completed", target="bronze_tables"
+            )
 
         ingest_elapsed = time.time() - ingest_start
-        logger.info(
-            "Ingested and streamed %d API asset(s) in %.2f seconds",
-            loaded_assets,
-            ingest_elapsed,
-        )
-
         elapsed = time.time() - start_time
+        log_event(
+            logger,
+            "pipeline",
+            status="completed",
+            loaded_assets=loaded_assets,
+            ingest_elapsed_seconds=ingest_elapsed,
+            elapsed_seconds=elapsed,
+        )
 
         logger.info("=" * 80)
         logger.info("INGESTION COMPLETED IN %.2f SECONDS", elapsed)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import random
-from collections.abc import Awaitable, Callable
 from urllib.parse import urljoin
 
 import httpx
 
+from acubed.application.ingestion.async_utils import gather_bounded
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.protocols import ChartSource
+from acubed.infrastructure.http.retry import RetryPolicy, request_with_retries
 
 from .config import QuaverConfig
 
@@ -26,6 +26,16 @@ class QuaverRemoteSource(ChartSource):
         # pack_id -> title cache (lazy hydration store)
         self._mapset_cache: dict[str, str] = {}
         self._mapset_payload_cache: dict[str, dict] = {}
+        self._retry_policy = RetryPolicy(
+            max_retries=self._MAX_RETRIES,
+            retryable_statuses=self._RETRYABLE_STATUSES,
+            min_retry_after=0.1,
+        )
+        self._chart_retry_policy = RetryPolicy(
+            max_retries=self._CHART_RETRIES,
+            retryable_statuses=self._RETRYABLE_STATUSES,
+            min_retry_after=0.1,
+        )
 
     # -------------------------
     # client lifecycle
@@ -59,70 +69,21 @@ class QuaverRemoteSource(ChartSource):
     # -------------------------
     # request helpers
     # -------------------------
-    def _retry_delay(
-        self,
-        attempt: int,
-        response: httpx.Response | None = None,
-    ) -> float:
-        if response is not None and response.status_code == 429:
-            retry_after = response.headers.get("retry-after")
-            if retry_after:
-                try:
-                    return max(float(retry_after), 0.1)
-                except ValueError:
-                    pass
-
-        return min(2**attempt, 30) + random.uniform(0.1, 0.5)
-
-    async def _request(
-        self,
-        request: Callable[[], Awaitable[httpx.Response]],
-        url: str,
-        *,
-        max_retries: int,
-    ) -> httpx.Response:
-        for attempt in range(max_retries):
-            response: httpx.Response | None = None
-
-            try:
-                response = await request()
-
-                if response.status_code in self._RETRYABLE_STATUSES:
-                    raise httpx.HTTPStatusError(
-                        f"Retryable HTTP {response.status_code}: {url}",
-                        request=response.request,
-                        response=response,
-                    )
-
-                response.raise_for_status()
-
-                if not response.content:
-                    raise ValueError(f"EMPTY RESPONSE: {url}")
-
-                return response
-
-            except (TimeoutError, httpx.HTTPError, ValueError):
-                if attempt == max_retries - 1:
-                    raise
-
-                await asyncio.sleep(self._retry_delay(attempt, response))
-
-        raise RuntimeError(f"Unreachable retry state: {url}")
-
     async def _request_json(self, client: httpx.AsyncClient, url: str):
-        response = await self._request(
+        response = await request_with_retries(
             lambda: client.get(url),
-            url,
-            max_retries=self._MAX_RETRIES,
+            self._retry_policy,
         )
         return response.json()
 
     async def _request_content(self, client: httpx.AsyncClient, url: str):
-        response = await self._request(
+        response = await request_with_retries(
             lambda: client.get(url),
-            url,
-            max_retries=self._MAX_RETRIES,
+            self._retry_policy,
         )
+        if not response.content:
+            raise ValueError(f"EMPTY RESPONSE: {url}")
+
         return response.content
 
     # -------------------------
@@ -227,38 +188,34 @@ class QuaverRemoteSource(ChartSource):
     ) -> AssetResponse:
         client = self._get_client()
 
-        for attempt in range(self._CHART_RETRIES):
+        async def request_pair() -> AssetResponse:
+            info_task = asyncio.create_task(
+                self._fetch_chart_info(client, chart_id)
+            )
+            chart_task = asyncio.create_task(
+                self._fetch_chart_data(client, chart_id)
+            )
+            info, chart_bytes = await asyncio.gather(info_task, chart_task)
+
+            if not chart_bytes:
+                raise ValueError(f"EMPTY CHART {chart_id}")
+
+            return AssetResponse(
+                metadata=info,
+                raw_chart=chart_bytes,
+                raw_payload={**info, "chart": chart_bytes},
+            )
+
+        for attempt in range(self._chart_retry_policy.max_retries):
             try:
-                info_task = asyncio.create_task(
-                    self._fetch_chart_info(client, chart_id)
-                )
-                chart_task = asyncio.create_task(
-                    self._fetch_chart_data(client, chart_id)
-                )
-
-                info, chart_bytes = await asyncio.gather(
-                    info_task,
-                    chart_task,
-                    return_exceptions=True,
-                )
-
-                for result in (info, chart_bytes):
-                    if isinstance(result, Exception):
-                        raise result
-
-                if not chart_bytes:
-                    raise ValueError(f"EMPTY CHART {chart_id}")
-
-                return AssetResponse(
-                    metadata=info,
-                    raw_chart=chart_bytes,
-                    raw_payload={**info, "chart": chart_bytes},
-                )
-
-            except (TimeoutError, httpx.HTTPError, ValueError):
-                if attempt == self._CHART_RETRIES - 1:
+                return await request_pair()
+            except (TimeoutError, httpx.HTTPError, ValueError) as exc:
+                if attempt == self._chart_retry_policy.max_retries - 1 or (
+                    not isinstance(exc, ValueError)
+                    and not self._chart_retry_policy.is_retryable(exc)
+                ):
                     raise
-                await asyncio.sleep(self._retry_delay(attempt))
+                await asyncio.sleep(self._chart_retry_policy.delay(attempt))
 
     # -------------------------
     # concurrency
@@ -271,11 +228,13 @@ class QuaverRemoteSource(ChartSource):
     ) -> list[tuple[ChartRef, AssetResponse]]:
 
         self._get_client()
-        sem = asyncio.Semaphore(concurrency)
 
         async def fetch_chart(chart: ChartRef):
-            async with sem:
-                result = await self.fetch_assets(chart.id, secrets)
-                return chart, result
+            result = await self.fetch_assets(chart.id, secrets)
+            return chart, result
 
-        return await asyncio.gather(*(fetch_chart(chart) for chart in charts))
+        return await gather_bounded(
+            charts,
+            fetch_chart,
+            concurrency=concurrency,
+        )

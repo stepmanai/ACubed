@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.definition import GameDefinition
-from acubed.infrastructure.logging import get_logger
+from acubed.infrastructure.logging import get_logger, log_event
 
 AssetResult = tuple[ChartRef, AssetResponse]
 BronzeEvent = tuple[str, list[Pack] | list[ChartRef] | list[AssetResult]]
@@ -68,6 +68,14 @@ class GameIngestionEngine:
                 pack_name = pack.name
 
             self.logger.info("%s: %d charts", pack_name, len(pack_charts))
+            log_event(
+                self.logger,
+                "pack_charts",
+                status="completed",
+                pack_id=pack.id,
+                pack_name=pack_name,
+                charts=len(pack_charts),
+            )
             charts.extend(pack_charts)
 
         return charts
@@ -78,9 +86,12 @@ class GameIngestionEngine:
     ) -> list[AssetResult]:
         source = self.game.source
         if getattr(source, "supports_assets", True) is False:
-            self.logger.info(
-                "%s source does not provide API assets; skipping asset phase",
-                self.game.name,
+            log_event(
+                self.logger,
+                "asset_fetch",
+                status="skipped",
+                game_id=self.game.id,
+                reason="source_does_not_support_assets",
             )
             return []
 
@@ -120,9 +131,12 @@ class GameIngestionEngine:
     ):
         source = self.game.source
         if getattr(source, "supports_assets", True) is False:
-            self.logger.info(
-                "%s source does not provide API assets; skipping asset phase",
-                self.game.name,
+            log_event(
+                self.logger,
+                "asset_fetch",
+                status="skipped",
+                game_id=self.game.id,
+                reason="source_does_not_support_assets",
             )
             return
 
@@ -136,13 +150,21 @@ class GameIngestionEngine:
             skipped_count = original_count - len(charts)
 
             if skipped_count:
-                self.logger.info(
-                    "Skipping %d chart asset(s) with existing source rows",
-                    skipped_count,
+                log_event(
+                    self.logger,
+                    "asset_fetch",
+                    status="skipping_existing_sources",
+                    skipped_assets=skipped_count,
+                    remaining_assets=len(charts),
                 )
 
             if not charts:
-                self.logger.info("No chart assets remain after source skip")
+                log_event(
+                    self.logger,
+                    "asset_fetch",
+                    status="skipped",
+                    reason="all_assets_already_have_source_rows",
+                )
                 return
 
         stream_many = getattr(source, "stream_many", None)
@@ -240,41 +262,81 @@ class GameIngestionEngine:
         ]
 
     async def stream(self):
-        self.logger.info("Starting %s ingestion pipeline", self.game.name)
+        log_event(
+            self.logger,
+            "ingestion",
+            status="starting",
+            game_id=self.game.id,
+            game_name=self.game.name,
+        )
 
         source = self.game.source
 
         try:
             phase_start = time.perf_counter()
+            log_event(
+                self.logger,
+                "fetch_packs",
+                status="starting",
+                game_id=self.game.id,
+            )
             packs = list(await source.fetch_packs())
-            self.logger.info(
-                "Fetched %d pack(s) in %.2fs",
-                len(packs),
-                time.perf_counter() - phase_start,
+            log_event(
+                self.logger,
+                "fetch_packs",
+                status="completed",
+                packs=len(packs),
+                elapsed_seconds=time.perf_counter() - phase_start,
             )
             yield "collections", self._collection_rows_for_packs(packs)
 
             phase_start = time.perf_counter()
+            log_event(
+                self.logger,
+                "fetch_chart_refs",
+                status="starting",
+                packs=len(packs),
+                concurrency=self.concurrency,
+            )
             charts = await self._fetch_charts_for_packs(packs)
 
-            self.logger.info(
-                "Discovered %d charts in %.2fs",
-                len(charts),
-                time.perf_counter() - phase_start,
+            log_event(
+                self.logger,
+                "fetch_chart_refs",
+                status="completed",
+                charts=len(charts),
+                elapsed_seconds=time.perf_counter() - phase_start,
             )
             yield "collections", self._collection_rows_for_packs(packs)
             yield "chart_refs", charts
 
             phase_start = time.perf_counter()
             downloaded = 0
+            log_event(
+                self.logger,
+                "fetch_assets",
+                status="starting",
+                charts=len(charts),
+                concurrency=self.concurrency,
+            )
             async for assets in self._stream_assets(charts):
                 downloaded += len(assets)
+                log_event(
+                    self.logger,
+                    "fetch_assets",
+                    status="batch_completed",
+                    batch_assets=len(assets),
+                    downloaded_assets=downloaded,
+                    total_charts=len(charts),
+                )
                 yield "assets", assets
 
-            self.logger.info(
-                "Downloaded %d chart asset(s) in %.2fs",
-                downloaded,
-                time.perf_counter() - phase_start,
+            log_event(
+                self.logger,
+                "fetch_assets",
+                status="completed",
+                downloaded_assets=downloaded,
+                elapsed_seconds=time.perf_counter() - phase_start,
             )
 
             # API parsing is disabled while bronze chart tables are being
@@ -290,7 +352,13 @@ class GameIngestionEngine:
         finally:
             await source.close()
 
-        self.logger.info("%s ingestion complete", self.game.name)
+        log_event(
+            self.logger,
+            "ingestion",
+            status="completed",
+            game_id=self.game.id,
+            game_name=self.game.name,
+        )
 
     async def run(self) -> list[AssetResult]:
         assets: list[AssetResult] = []

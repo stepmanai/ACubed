@@ -9,3 +9,5 @@ Each plugin implements the game contracts in `acubed.domain.game.protocols`:
 
 Keep game-specific API quirks in the plugin. Shared orchestration belongs in
 `application/`, and framework or storage adapters belong in `infrastructure/`.
+Use shared helpers for cross-plugin concerns such as environment parsing,
+bounded async concurrency, and retryable HTTP requests.

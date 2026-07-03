@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from acubed.infrastructure.logging import log_event
+
 try:
     import narwhals as nw
 except ImportError:
@@ -119,7 +121,14 @@ class BronzeRepository(_BaseRepository):
         label: str,
     ):
         if not rows:
-            self.logger.info("No %s to sync", label)
+            log_event(
+                self.logger,
+                "storage_sync",
+                status="skipped",
+                label=label,
+                reason="no_rows",
+                table=table_name,
+            )
             return
 
         rows = self._dedupe_rows(rows, key_columns)
@@ -135,18 +144,46 @@ class BronzeRepository(_BaseRepository):
             and set(key_columns).issubset(table_columns)
             and table_columns == row_columns
         ):
+            action = "upsert"
+            log_event(
+                self.logger,
+                "storage_sync",
+                status="starting",
+                action=action,
+                label=label,
+                table=table_name,
+                rows=len(rows),
+            )
             self.storage.upsert_table(
                 table_name,
                 frame.to_native(),
                 key_columns,
             )
         else:
+            action = "overwrite"
+            log_event(
+                self.logger,
+                "storage_sync",
+                status="starting",
+                action=action,
+                label=label,
+                table=table_name,
+                rows=len(rows),
+            )
             self.storage.overwrite_table(
                 table_name,
                 frame.to_native(),
             )
 
-        self.logger.info("%s synced: %s rows", label, self._row_count(frame))
+        log_event(
+            self.logger,
+            "storage_sync",
+            status="completed",
+            action=action,
+            label=label,
+            table=table_name,
+            rows=self._row_count(frame),
+        )
 
     def _dedupe_rows(
         self,
@@ -186,7 +223,13 @@ class BronzeRepository(_BaseRepository):
 
     def stage_source(self, staging_table: str, source: list[dict]):
         if not source:
-            self.logger.info("No Source to stage")
+            log_event(
+                self.logger,
+                "source_stage",
+                status="skipped",
+                reason="no_rows",
+                table=staging_table,
+            )
             return
 
         if not hasattr(self.storage, "append_table"):
@@ -195,8 +238,23 @@ class BronzeRepository(_BaseRepository):
 
         source = self._dedupe_rows(source, ["_acubed_source_id"])
         frame = self._frame(source)
+        log_event(
+            self.logger,
+            "source_stage",
+            status="starting",
+            action="append",
+            table=staging_table,
+            rows=len(source),
+        )
         self.storage.append_table(staging_table, frame.to_native())
-        self.logger.info("Source staged: %s rows", self._row_count(frame))
+        log_event(
+            self.logger,
+            "source_stage",
+            status="completed",
+            action="append",
+            table=staging_table,
+            rows=self._row_count(frame),
+        )
 
     def merge_staged_source(self, staging_table: str):
         if not hasattr(self.storage, "upsert_from_table"):
@@ -209,7 +267,14 @@ class BronzeRepository(_BaseRepository):
             staging_table,
             ["_acubed_source_id"],
         )
-        self.logger.info("Staged Source merged into bronze source")
+        log_event(
+            self.logger,
+            "source_stage",
+            status="completed",
+            action="merge",
+            source_table=staging_table,
+            target_table=self.table_config.source,
+        )
 
 
 class ChartsRepository(BronzeRepository):
@@ -291,7 +356,14 @@ class DatabricksStepfileRepository:
                 collections,
                 key_columns=("_acubed_collection_id",),
             )
-            self.logger.info("Collections synced: %s rows", len(collections))
+            log_event(
+                self.logger,
+                "storage_sync",
+                status="completed",
+                label="Collections",
+                table=self.table_config.collections,
+                rows=len(collections),
+            )
 
         if charts:
             charts = self._dedupe_rows(charts, ["_acubed_chart_id"])
@@ -300,7 +372,14 @@ class DatabricksStepfileRepository:
                 charts,
                 key_columns=("_acubed_chart_id",),
             )
-            self.logger.info("Charts synced: %s rows", len(charts))
+            log_event(
+                self.logger,
+                "storage_sync",
+                status="completed",
+                label="Charts",
+                table=self.table_config.charts,
+                rows=len(charts),
+            )
 
         if source:
             source = self._dedupe_rows(source, ["_acubed_source_id"])
@@ -309,7 +388,14 @@ class DatabricksStepfileRepository:
                 source,
                 key_columns=("_acubed_source_id",),
             )
-            self.logger.info("Source synced: %s rows", len(source))
+            log_event(
+                self.logger,
+                "storage_sync",
+                status="completed",
+                label="Source",
+                table=self.table_config.source,
+                rows=len(source),
+            )
 
         if optimize:
             self.storage.optimize_tables(

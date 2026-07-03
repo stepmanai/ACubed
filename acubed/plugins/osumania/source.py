@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import io
 import os
-import random
 import time
 import zipfile
 from collections import defaultdict
@@ -12,18 +11,18 @@ from urllib.parse import urljoin
 
 import httpx
 
+from acubed.application.ingestion.assets import empty_asset_response
+from acubed.application.ingestion.async_utils import (
+    iter_completed_task_batches,
+    iter_completed_tasks,
+)
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.protocols import ChartSource
+from acubed.infrastructure.environment.variables import env_int
+from acubed.infrastructure.http.retry import RetryPolicy, request_with_retries
 from acubed.infrastructure.logging import get_logger
 
 from .config import OsuManiaConfig
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, default))
-    except (TypeError, ValueError):
-        return default
 
 
 class OsuManiaRemoteSource(ChartSource):
@@ -44,6 +43,11 @@ class OsuManiaRemoteSource(ChartSource):
         self._pack_osu_cache: dict[str, dict[str, dict]] = {}
         self._pack_locks: dict[str, asyncio.Lock] = {}
         self._logger = get_logger()
+        self._retry_policy = RetryPolicy(
+            max_retries=self._MAX_RETRIES,
+            retryable_statuses=self._RETRYABLE_STATUSES,
+            retry_non_status_http_errors=True,
+        )
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -106,28 +110,6 @@ class OsuManiaRemoteSource(ChartSource):
         self._access_token_expires_at = now + int(payload.get("expires_in", 0))
         return self._access_token
 
-    def _retry_delay(
-        self,
-        attempt: int,
-        response: httpx.Response | None = None,
-    ) -> float:
-        if response is not None and response.status_code == 429:
-            retry_after = response.headers.get("retry-after")
-            if retry_after:
-                try:
-                    return max(float(retry_after), 0.5)
-                except ValueError:
-                    pass
-
-        return min(2**attempt, 30) + random.uniform(0.1, 0.5)
-
-    def _is_retryable_exception(self, exc: BaseException) -> bool:
-        if isinstance(exc, httpx.HTTPStatusError):
-            response = exc.response
-            return response.status_code in self._RETRYABLE_STATUSES
-
-        return isinstance(exc, (TimeoutError, httpx.TimeoutException))
-
     async def _request(
         self,
         method: str,
@@ -137,49 +119,29 @@ class OsuManiaRemoteSource(ChartSource):
         auth: bool = True,
         **kwargs,
     ) -> httpx.Response:
-        response: httpx.Response | None = None
+        headers = dict(kwargs.pop("headers", {}) or {})
+        if auth:
+            headers["Authorization"] = f"Bearer {await self._token(secrets)}"
 
-        for attempt in range(self._MAX_RETRIES):
-            try:
-                headers = dict(kwargs.pop("headers", {}) or {})
-                if auth:
-                    headers["Authorization"] = (
-                        f"Bearer {await self._token(secrets)}"
-                    )
-                response = await self._get_client().request(
-                    method,
-                    url,
-                    headers=headers,
-                    **kwargs,
+        async def request() -> httpx.Response:
+            response = await self._get_client().request(
+                method,
+                url,
+                headers=headers,
+                **kwargs,
+            )
+
+            if response.status_code == 401 and auth:
+                self._access_token = None
+                raise httpx.HTTPStatusError(
+                    "Expired or invalid osu! OAuth token",
+                    request=response.request,
+                    response=response,
                 )
 
-                if response.status_code == 401 and auth:
-                    self._access_token = None
-                    raise httpx.HTTPStatusError(
-                        "Expired or invalid osu! OAuth token",
-                        request=response.request,
-                        response=response,
-                    )
+            return response
 
-                if response.status_code in self._RETRYABLE_STATUSES:
-                    raise httpx.HTTPStatusError(
-                        f"Retryable HTTP {response.status_code}: {url}",
-                        request=response.request,
-                        response=response,
-                    )
-
-                response.raise_for_status()
-                return response
-
-            except (TimeoutError, httpx.HTTPError) as exc:
-                if (
-                    attempt == self._MAX_RETRIES - 1
-                    or not self._is_retryable_exception(exc)
-                ):
-                    raise
-                await asyncio.sleep(self._retry_delay(attempt, response))
-
-        raise RuntimeError(f"Unreachable retry state: {url}")
+        return await request_with_retries(request, self._retry_policy)
 
     async def _request_json(
         self,
@@ -225,7 +187,7 @@ class OsuManiaRemoteSource(ChartSource):
         return f"{artist} - {title}".strip(" -")
 
     def _pack_limit(self) -> int:
-        return max(_env_int("OSUMANIA_PACK_LIMIT", 0), 0)
+        return env_int("OSUMANIA_PACK_LIMIT", 0, minimum=0)
 
     async def fetch_packs(self) -> list[Pack]:
         packs: list[Pack] = []
@@ -482,17 +444,6 @@ class OsuManiaRemoteSource(ChartSource):
         url = f"{self.config.web_base_url.rstrip('/')}/osu/{chart_id}"
         return await self._request_content(url, secrets=secrets, auth=False)
 
-    def _empty_asset_response(self, chart: ChartRef) -> AssetResponse:
-        metadata = dict(chart.raw_payload or {})
-        metadata.setdefault("id", chart.id)
-        metadata.setdefault("pack_id", chart.pack_id)
-        metadata["source_file_name"] = ""
-        return AssetResponse(
-            metadata=metadata,
-            raw_chart=b"",
-            raw_payload={**metadata, "chart": b""},
-        )
-
     async def fetch_assets(
         self,
         chart_id: str,
@@ -567,9 +518,7 @@ class OsuManiaRemoteSource(ChartSource):
                             )
                         )
                     except (httpx.HTTPError, ValueError):
-                        results.append(
-                            (chart, self._empty_asset_response(chart))
-                        )
+                        results.append((chart, empty_asset_response(chart)))
                 return results
 
             self._logger.warning(
@@ -580,9 +529,7 @@ class OsuManiaRemoteSource(ChartSource):
                 len(charts),
                 exc,
             )
-            return [
-                (chart, self._empty_asset_response(chart)) for chart in charts
-            ]
+            return [(chart, empty_asset_response(chart)) for chart in charts]
         finally:
             self._pack_osu_cache.pop(pack_id, None)
 
@@ -641,42 +588,18 @@ class OsuManiaRemoteSource(ChartSource):
                 self._PROGRESS_LOG_SECONDS,
             )
         )
-        stop_heartbeat = asyncio.Event()
-
-        async def log_heartbeat() -> None:
-            if heartbeat_seconds <= 0:
-                return
-
-            total = len(tasks)
-            while not stop_heartbeat.is_set():
-                try:
-                    await asyncio.wait_for(
-                        stop_heartbeat.wait(),
-                        timeout=heartbeat_seconds,
-                    )
-                except TimeoutError:
-                    done = sum(1 for task in tasks if task.done())
-                    self._logger.info(
-                        "osu!mania asset extraction heartbeat: "
-                        "%d/%d beatmapset(s) complete, %d pending",
-                        done,
-                        total,
-                        total - done,
-                    )
-
-        heartbeat_task = asyncio.create_task(log_heartbeat())
-
-        try:
-            for task in asyncio.as_completed(tasks):
-                yield await task
-        except Exception:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-        finally:
-            stop_heartbeat.set()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        async for result in iter_completed_tasks(
+            tasks,
+            heartbeat_seconds=heartbeat_seconds,
+            logger=self._logger,
+            heartbeat_message=lambda done, total: (
+                "event=source_heartbeat source=osumania "
+                "action=extract_beatmapset_assets "
+                f"completed_beatmapsets={done} total_beatmapsets={total} "
+                f"pending_beatmapsets={total - done}"
+            ),
+        ):
+            yield result
 
     async def _stream_direct_many(
         self,
@@ -700,7 +623,7 @@ class OsuManiaRemoteSource(ChartSource):
                 try:
                     result = await self.fetch_assets(chart.id, secrets)
                 except (httpx.HTTPError, ValueError):
-                    result = self._empty_asset_response(chart)
+                    result = empty_asset_response(chart)
                 return chart, result
 
         tasks = [asyncio.create_task(fetch_chart(chart)) for chart in charts]
@@ -711,47 +634,17 @@ class OsuManiaRemoteSource(ChartSource):
                 self._PROGRESS_LOG_SECONDS,
             )
         )
-        stop_heartbeat = asyncio.Event()
-
-        async def log_heartbeat() -> None:
-            if heartbeat_seconds <= 0:
-                return
-
-            total = len(tasks)
-            while not stop_heartbeat.is_set():
-                try:
-                    await asyncio.wait_for(
-                        stop_heartbeat.wait(),
-                        timeout=heartbeat_seconds,
-                    )
-                except TimeoutError:
-                    done = sum(1 for task in tasks if task.done())
-                    self._logger.info(
-                        "osu!mania direct asset heartbeat: "
-                        "%d/%d chart(s) complete, %d pending, concurrency=%d",
-                        done,
-                        total,
-                        total - done,
-                        chart_concurrency,
-                    )
-
-        heartbeat_task = asyncio.create_task(log_heartbeat())
-
-        try:
-            batch: list[tuple[ChartRef, AssetResponse]] = []
-            for task in asyncio.as_completed(tasks):
-                batch.append(await task)
-                if len(batch) >= direct_batch_size:
-                    yield batch
-                    batch = []
-
-            if batch:
-                yield batch
-        except Exception:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-        finally:
-            stop_heartbeat.set()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+        async for batch in iter_completed_task_batches(
+            tasks,
+            batch_size=direct_batch_size,
+            heartbeat_seconds=heartbeat_seconds,
+            logger=self._logger,
+            heartbeat_message=lambda done, total: (
+                "event=source_heartbeat source=osumania "
+                "action=download_direct_osu "
+                f"completed_charts={done} total_charts={total} "
+                f"pending_charts={total - done} "
+                f"concurrency={chart_concurrency}"
+            ),
+        ):
+            yield batch
