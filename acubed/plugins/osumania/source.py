@@ -189,7 +189,9 @@ class OsuManiaRemoteSource(ChartSource):
     def _pack_limit(self) -> int:
         return env_int("OSUMANIA_PACK_LIMIT", 0, minimum=0)
 
-    async def fetch_packs(self) -> list[Pack]:
+    async def fetch_packs(
+        self, secrets: dict[str, str] | None = None
+    ) -> list[Pack]:
         packs: list[Pack] = []
         cursor_string: str | None = None
         cursor: dict | None = None
@@ -208,7 +210,7 @@ class OsuManiaRemoteSource(ChartSource):
                     params[f"cursor[{key}]"] = value
 
             data = await self._request_json(
-                "beatmapsets/search", params=params
+                "beatmapsets/search", params=params, secrets=secrets
             )
             beatmapsets = data.get("beatmapsets") or []
             if not beatmapsets:
@@ -236,11 +238,13 @@ class OsuManiaRemoteSource(ChartSource):
 
         return packs
 
-    async def _pack_payload(self, pack_id: str) -> dict:
+    async def _pack_payload(
+        self, pack_id: str, secrets: dict[str, str] | None = None
+    ) -> dict:
         if pack_id in self._pack_payload_cache:
             return self._pack_payload_cache[pack_id]
 
-        payload = await self._request_json(f"beatmapsets/{pack_id}")
+        payload = await self._request_json(f"beatmapsets/{pack_id}", secrets=secrets)
         self._pack_payload_cache[pack_id] = payload
         self._pack_cache[pack_id] = self._pack_name(payload)
         return payload
@@ -269,8 +273,10 @@ class OsuManiaRemoteSource(ChartSource):
             },
         }
 
-    async def fetch_pack_charts(self, pack_id: str) -> list[ChartRef]:
-        pack = await self._pack_payload(pack_id)
+    async def fetch_pack_charts(
+        self, pack_id: str, secrets: dict[str, str] | None = None
+    ) -> list[ChartRef]:
+        pack = await self._pack_payload(pack_id, secrets)
         return self._charts_from_pack(pack)
 
     def _charts_from_pack(self, pack: dict) -> list[ChartRef]:
@@ -302,6 +308,7 @@ class OsuManiaRemoteSource(ChartSource):
     async def fetch_charts_for_packs(
         self,
         packs: list[Pack],
+        secrets: dict[str, str] | None = None,
         concurrency: int = 8,
     ) -> list[ChartRef]:
         charts: list[ChartRef] = []
@@ -325,7 +332,7 @@ class OsuManiaRemoteSource(ChartSource):
 
         async def fetch_missing(pack: Pack) -> list[ChartRef]:
             async with sem:
-                return await self.fetch_pack_charts(pack.id)
+                return await self.fetch_pack_charts(pack.id, secrets)
 
         tasks = [
             asyncio.create_task(fetch_missing(pack)) for pack in missing_packs

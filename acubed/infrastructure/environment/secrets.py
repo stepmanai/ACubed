@@ -77,22 +77,23 @@ def _get_databricks_secret(dbutils: Any, secret_ref: str) -> str | None:
         # Try multiple patterns to find the secret
         patterns = []
 
-        # Pattern 1: Default scope with transformed key
-        # (e.g., acubed/ffr-api-key)
+        # Pattern 1: Extract game scope from prefix and transform remaining parts
+        # (e.g., FFR_API_KEY -> ffr/api-key, OSU_CLIENT_ID -> osu/client-id)
+        if "_" in secret_ref:
+            parts = secret_ref.split("_", 1)  # Split only on first underscore
+            if len(parts) == 2:
+                game_scope = parts[0].lower()
+                remaining_key = parts[1].lower().replace("_", "-")
+                patterns.append((game_scope, remaining_key))
+
+        # Pattern 2: Default scope with transformed key
+        # (e.g., acubed/ffr-api-key, acubed/osu-client-id)
         default_scope = os.getenv("ACUBED_DATABRICKS_SECRET_SCOPE", "acubed")
         transformed_key = secret_ref.lower().replace("_", "-")
         patterns.append((default_scope, transformed_key))
 
-        # Pattern 2: Extract game from secret name as scope
-        # (e.g., FFR_API_KEY -> ffr/api-key)
-        if "_" in secret_ref:
-            parts = secret_ref.split("_")
-            if len(parts) >= 2:
-                game_scope = parts[0].lower()
-                patterns.append((game_scope, "api-key"))
-
         # Pattern 3: Game scope with full transformed key
-        # (e.g., ffr/ffr-api-key)
+        # (e.g., ffr/ffr-api-key, osu/osu-client-id)
         if "_" in secret_ref:
             game_scope = secret_ref.split("_")[0].lower()
             patterns.append((game_scope, transformed_key))

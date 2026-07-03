@@ -8,8 +8,13 @@ import nest_asyncio
 from acubed.interfaces.cli.ingest import async_main
 
 if __name__ == "__main__":
-    package_root = Path.cwd().parent.parent.parent
+    try:
+        script_path = Path(__file__).resolve()
+        package_root = script_path.parent.parent.parent.parent
+    except NameError:
+        package_root = Path("/Workspace/Shared/ACubed")
 
+    print(f"Installing package from: {package_root}")
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "-e", str(package_root)],
         stdout=subprocess.DEVNULL,

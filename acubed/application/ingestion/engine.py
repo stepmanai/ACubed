@@ -39,6 +39,7 @@ class GameIngestionEngine:
             return list(
                 await fetch_charts_for_packs(
                     packs,
+                    secrets=self.secrets,
                     concurrency=self.concurrency,
                 )
             )
@@ -48,7 +49,7 @@ class GameIngestionEngine:
 
         async def fetch_pack(pack: Pack) -> tuple[Pack, list[ChartRef]]:
             async with sem:
-                return pack, list(await source.fetch_pack_charts(pack.id))
+                return pack, list(await source.fetch_pack_charts(pack.id, self.secrets))
 
         tasks = [asyncio.create_task(fetch_pack(pack)) for pack in packs]
 
@@ -280,7 +281,7 @@ class GameIngestionEngine:
                 status="starting",
                 game_id=self.game.id,
             )
-            packs = list(await source.fetch_packs())
+            packs = list(await source.fetch_packs(self.secrets))
             log_event(
                 self.logger,
                 "fetch_packs",

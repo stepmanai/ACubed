@@ -114,22 +114,15 @@ class DatabricksStorage(BaseStorage):
 
         return f"{self.namespace}.`{table_name}`"
 
-    def _ensure_spark_dataframe(self, dataframe):
-        if hasattr(dataframe, "write"):
-            return dataframe
-
-        return self.spark.createDataFrame(dataframe)
-
-    def _empty_dataframe(self, columns: Sequence[str]):
+    def _get_column_types(self):
+        """Get the type mappings for all known columns."""
         from pyspark.sql.types import (
             DoubleType,
             LongType,
             StringType,
-            StructField,
-            StructType,
         )
 
-        numeric_types = {
+        return {
             "song_id": LongType(),
             "note_id": LongType(),
             "note_count": LongType(),
@@ -147,13 +140,56 @@ class DatabricksStorage(BaseStorage):
             "chart_base64": StringType(),
             "difficulty_name": StringType(),
             "keys": LongType(),
+            "collection_name": StringType(),
         }
+
+    def _ensure_spark_dataframe(self, dataframe):
+        if hasattr(dataframe, "write"):
+            return dataframe
+
+        # Extract columns from pandas DataFrame
+        if hasattr(dataframe, "columns"):
+            columns = list(dataframe.columns)
+        else:
+            # Fallback for list of dicts
+            if isinstance(dataframe, list) and dataframe:
+                columns = list(dataframe[0].keys())
+            else:
+                # Empty or unrecognized type - let Spark infer
+                return self.spark.createDataFrame(dataframe)
+
+        # Build explicit schema using known types
+        from pyspark.sql.types import (
+            StringType,
+            StructField,
+            StructType,
+        )
+
+        column_types = self._get_column_types()
+        schema = StructType([
+            StructField(
+                col,
+                column_types.get(col, StringType()),  # Default to StringType for unknown columns
+                True  # nullable
+            )
+            for col in columns
+        ])
+
+        return self.spark.createDataFrame(dataframe, schema=schema)
+
+    def _empty_dataframe(self, columns: Sequence[str]):
+        from pyspark.sql.types import (
+            StructField,
+            StructType,
+        )
+
+        column_types = self._get_column_types()
 
         return self.spark.createDataFrame(
             [],
             StructType(
                 [
-                    StructField(column, numeric_types[column], True)
+                    StructField(column, column_types[column], True)
                     for column in columns
                 ]
             ),
@@ -266,11 +302,8 @@ class DatabricksStorage(BaseStorage):
             assets,
             numSlices=optimal_slices,
         )
-
-        # OPTIMIZATION: Process both charts and source in single pass
-        # to avoid re-scanning the RDD
-        charts_rdd = assets_rdd.flatMap(_api_asset_to_bronze)
-        source_rdd = assets_rdd.flatMap(_api_asset_to_bronze_source)
+        charts_rdd = assets_rdd.flatMap(_api_asset_to_bronze).cache()
+        source_rdd = assets_rdd.flatMap(_api_asset_to_bronze_source).cache()
 
         charts = self._dataframe_from_rdd(
             charts_rdd,
@@ -286,7 +319,6 @@ class DatabricksStorage(BaseStorage):
                 "api_payload",
             ),
         ).cache()
-
         source = self._dataframe_from_rdd(
             source_rdd,
             (
@@ -297,17 +329,12 @@ class DatabricksStorage(BaseStorage):
             ),
         ).cache()
 
-        # OPTIMIZATION: Trigger count() to cache dataframes before returning
-        # This ensures data is materialized in cache before MERGE operations
-        charts_count = charts.count()
-        source_count = source.count()
-
         return DatabricksTableFrames(
             charts=charts,
             source=source,
-            charts_count=charts_count,
-            source_count=source_count,
-            _cached_frames=(charts, source),
+            charts_count=charts.count(),
+            source_count=source.count(),
+            _cached_frames=(charts, source, charts_rdd, source_rdd),
         )
 
     def table_exists(self, table_name: str) -> bool:
@@ -318,147 +345,90 @@ class DatabricksStorage(BaseStorage):
         qualified = self._get_qualified_name(table_name)
         return self.spark.table(qualified)
 
-    def overwrite_table(
-        self,
-        table_name: str,
-        dataframe,
-    ) -> None:
+    def overwrite_table(self, table_name: str, dataframe) -> None:
         qualified = self._get_qualified_name(table_name)
         spark_df = self._ensure_spark_dataframe(dataframe)
-        (
-            spark_df.write.format("delta")
-            .mode("overwrite")
-            .option("overwriteSchema", "true")
-            .saveAsTable(qualified)
-        )
+        spark_df.write.format("delta").mode("overwrite").option(
+            "overwriteSchema", "true"
+        ).saveAsTable(qualified)
 
-    def upsert_table(
-        self,
-        table_name: str,
-        dataframe,
-        key_columns: Sequence[str],
-    ) -> None:
+    def append_table(self, table_name: str, dataframe) -> None:
         qualified = self._get_qualified_name(table_name)
         spark_df = self._ensure_spark_dataframe(dataframe)
-        temp_view = f"_acubed_upsert_{abs(hash(qualified))}"
-
-        # OPTIMIZATION: Coalesce small batches to reduce shuffle overhead
-        # For batches < 1000 rows, use single partition to avoid shuffle
-        row_count = spark_df.count()
-        if row_count < 1000:
-            spark_df = spark_df.coalesce(1)
-        elif row_count < 10000:
-            # For medium batches, use limited partitions
-            spark_df = spark_df.coalesce(min(row_count // 500, 20))
-
-        spark_df.createOrReplaceTempView(temp_view)
 
         if not self.table_exists(table_name):
-            self.overwrite_table(table_name, spark_df)
+            spark_df.write.format("delta").mode("append").saveAsTable(qualified)
             return
 
         target_columns = self.spark.table(qualified).columns
-        assignments = ", ".join(
-            f"target.`{col}` = source.`{col}`" for col in target_columns
-        )
-        insert_columns = ", ".join(f"`{col}`" for col in target_columns)
-        insert_values = ", ".join(f"source.`{col}`" for col in target_columns)
-        merge_condition = " AND ".join(
-            f"target.`{col}` = source.`{col}`" for col in key_columns
+        reordered = spark_df.select(*target_columns)
+        reordered.write.format("delta").mode("append").saveAsTable(qualified)
+
+    def upsert_table(
+        self, table_name: str, dataframe, key_columns: Sequence[str]
+    ) -> None:
+        from pyspark.sql import functions as F
+
+        qualified = self._get_qualified_name(table_name)
+        spark_df = self._ensure_spark_dataframe(dataframe)
+        
+        # Check if table exists first
+        if not self.table_exists(table_name):
+            # Table doesn't exist - create it
+            spark_df.write.format("delta").mode("overwrite").saveAsTable(qualified)
+            return
+        
+        # Table exists - perform MERGE
+        target_columns = set(self.spark.table(qualified).columns)
+        update_expr = {
+            col: f"source.{col}"
+            for col in spark_df.columns
+            if col in target_columns
+        }
+        self.spark.sql(
+            f"MERGE INTO {qualified} AS target "
+            f"USING (SELECT * FROM {spark_df.createOrReplaceTempView('_merge_source') or '_merge_source'}) AS source "
+            f"ON {' AND '.join(f'target.{col} = source.{col}' for col in key_columns)} "
+            f"WHEN MATCHED THEN UPDATE SET {', '.join(f'{col} = {expr}' for col, expr in update_expr.items())} "
+            f"WHEN NOT MATCHED THEN INSERT *"
         )
 
-        self.spark.sql(
-            f"""
-            MERGE INTO {qualified} AS target
-            USING `{temp_view}` AS source
-            ON {merge_condition}
-            WHEN MATCHED THEN UPDATE SET {assignments}
-            WHEN NOT MATCHED THEN INSERT ({insert_columns})
-            VALUES ({insert_values})
-            """
-        )
+    def drop_table(self, table_name: str) -> None:
+        qualified = self._get_qualified_name(table_name)
+        if self.table_exists(table_name):
+            self.spark.sql(f"DROP TABLE IF EXISTS {qualified}")
+
+    def optimize_tables(self, table_names: Iterable[str]) -> None:
+        for table_name in table_names:
+            qualified = self._get_qualified_name(table_name)
+            if self.table_exists(table_name):
+                self.spark.sql(f"OPTIMIZE {qualified}")
+                self.spark.sql(
+                    f"VACUUM {qualified} RETAIN 168 HOURS"
+                )
+
+    def iter_event_rows(
+        self,
+        table_name: str,
+    ) -> Iterable[Mapping[str, Any]]:
+        """Iterate over event rows from a table."""
+        qualified = self._get_qualified_name(table_name)
+        df = self.spark.table(qualified).orderBy("song_id", "note_id")
+        
+        for row in df.collect():
+            yield {
+                "song_id": row["song_id"],
+                "note_id": row["note_id"],
+                "time": row.get("time", row.get("timestamp_ms", 0)),
+                "lane": row["lane"],
+            }
 
     def sync_delta_table(
         self,
         table_name: str,
         dataframe,
         key_columns: Sequence[str],
-        partition_columns: Sequence[str] | None = None,
-    ) -> str:
-        qualified = self._get_qualified_name(table_name)
-        spark_df = self._ensure_spark_dataframe(dataframe)
-
-        if not self.table_exists(table_name):
-            writer = spark_df.write.format("delta").mode("overwrite")
-            if partition_columns:
-                writer = writer.partitionBy(*partition_columns)
-            writer.saveAsTable(qualified)
-            return "created"
-
-        target_columns = set(self.spark.table(qualified).columns)
-        source_columns = set(spark_df.columns)
-        if (
-            not set(key_columns).issubset(target_columns)
-            or target_columns != source_columns
-        ):
-            writer = (
-                spark_df.write.format("delta")
-                .mode("overwrite")
-                .option("overwriteSchema", "true")
-            )
-            if partition_columns:
-                writer = writer.partitionBy(*partition_columns)
-            writer.saveAsTable(qualified)
-            return "replaced"
-
-        self.upsert_table(table_name, spark_df, key_columns)
-        return "merged"
-
-    def sync_ingestion_tables(
-        self,
-        table_config: TableConfig,
-        frames: DatabricksTableFrames,
-    ) -> dict[str, str]:
-        chart_action = self.sync_delta_table(
-            table_config.charts,
-            frames.charts,
-            key_columns=("_acubed_chart_id",),
-        )
-        actions = {
-            table_config.charts: chart_action,
-        }
-        if frames.source is not None:
-            actions[table_config.source] = self.sync_delta_table(
-                table_config.source,
-                frames.source,
-                key_columns=("_acubed_source_id",),
-            )
-
-        return actions
-
-    def optimize_tables(self, table_names: Sequence[str]) -> None:
-        for table_name in table_names:
-            qualified = self._get_qualified_name(table_name)
-            self.spark.sql(f"OPTIMIZE {qualified}")
-            self.spark.sql(
-                f"ANALYZE TABLE {qualified} COMPUTE STATISTICS FOR ALL COLUMNS"
-            )
-
-    def iter_event_rows(
-        self,
-        table_name: str,
-    ) -> Iterable[Mapping[str, Any]]:
-        df = self.read_table(table_name)
-        rows = (
-            df.select("song_id", "note_id", "time", "lane")
-            .orderBy("song_id", "note_id")
-            .collect()
-        )
-
-        for row in rows:
-            yield {
-                "song_id": row["song_id"],
-                "note_id": row["note_id"],
-                "time": row["time"],
-                "lane": row["lane"],
-            }
+    ) -> None:
+        """Sync data to a Delta table using upsert (merge) logic."""
+        # Use the existing upsert_table method
+        self.upsert_table(table_name, dataframe, key_columns)
