@@ -3,19 +3,17 @@
 from __future__ import annotations
 
 import httpx
-from tqdm import tqdm
 
 from acubed.application.ingestion.async_utils import iter_completed_bounded
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.protocols import ChartSource
 from acubed.infrastructure.http.retry import RetryPolicy, request_with_retries
+from acubed.infrastructure.logging import progress_bar
 
 from .config import FFRConfig
 
 
 class FFRRemoteSource(ChartSource):
-    _MAX_RETRIES = 10
-    _MAX_CONNECTIONS = 100
     _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
 
     def __init__(self, config: FFRConfig):
@@ -23,7 +21,7 @@ class FFRRemoteSource(ChartSource):
         self._client: httpx.AsyncClient | None = None
         self._collection_payloads: dict[str, dict] = {}
         self._retry_policy = RetryPolicy(
-            max_retries=self._MAX_RETRIES,
+            max_retries=self.config.max_retries,
             retryable_statuses=self._RETRYABLE_STATUSES,
             min_retry_after=0.1,
             retry_value_errors=True,
@@ -52,14 +50,14 @@ class FFRRemoteSource(ChartSource):
         if self._client is None:
             timeout = httpx.Timeout(
                 connect=20.0,
-                read=30.0,
+                read=self.config.request_timeout,
                 write=30.0,
                 pool=30.0,
             )
 
             limits = httpx.Limits(
-                max_connections=self._MAX_CONNECTIONS,
-                max_keepalive_connections=self._MAX_CONNECTIONS,
+                max_connections=self.config.max_connections,
+                max_keepalive_connections=self.config.max_connections,
             )
 
             self._client = httpx.AsyncClient(timeout=timeout, limits=limits)
@@ -103,8 +101,16 @@ class FFRRemoteSource(ChartSource):
 
         client = self._get_client()
 
-        response = await client.get(self.config.playlist_url)
-        response.raise_for_status()
+        async def request_playlist() -> httpx.Response:
+            response = await client.get(self.config.playlist_url)
+            if response.status_code not in self._RETRYABLE_STATUSES:
+                response.json()
+            return response
+
+        response = await request_with_retries(
+            request_playlist,
+            self._retry_policy,
+        )
 
         playlist = response.json()
         self._collection_payloads[pack_id] = {
@@ -177,7 +183,7 @@ class FFRRemoteSource(ChartSource):
             )
             raise ValueError(
                 f"FAILED chart_id={chart_id} "
-                f"after {self._MAX_RETRIES} retries:\n\n"
+                f"after {self.config.max_retries} retries:\n\n"
                 f"{details}"
             ) from exc
 
@@ -200,10 +206,13 @@ class FFRRemoteSource(ChartSource):
         completed = iter_completed_bounded(
             charts,
             fetch_chart,
-            concurrency=concurrency,
+            concurrency=max(
+                min(concurrency, self.config.chart_asset_concurrency),
+                1,
+            ),
         )
-        with tqdm(
-            total=len(charts), desc="Download FFR charts", unit="chart"
+        with progress_bar(
+            total=len(charts), desc="Downloading source files", unit="chart"
         ) as progress:
             async for result in completed:
                 results.append(result)

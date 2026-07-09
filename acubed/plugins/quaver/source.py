@@ -14,9 +14,6 @@ from .config import QuaverConfig
 
 
 class QuaverRemoteSource(ChartSource):
-    _MAX_RETRIES = 5
-    _CHART_RETRIES = 10
-    _DEFAULT_MAX_CONNECTIONS = 100
     _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
 
     def __init__(self, config: QuaverConfig):
@@ -27,12 +24,12 @@ class QuaverRemoteSource(ChartSource):
         self._mapset_cache: dict[str, str] = {}
         self._mapset_payload_cache: dict[str, dict] = {}
         self._retry_policy = RetryPolicy(
-            max_retries=self._MAX_RETRIES,
+            max_retries=self.config.max_retries,
             retryable_statuses=self._RETRYABLE_STATUSES,
             min_retry_after=0.1,
         )
         self._chart_retry_policy = RetryPolicy(
-            max_retries=self._CHART_RETRIES,
+            max_retries=self.config.chart_max_retries,
             retryable_statuses=self._RETRYABLE_STATUSES,
             min_retry_after=0.1,
         )
@@ -44,14 +41,14 @@ class QuaverRemoteSource(ChartSource):
         if self._client is None:
             timeout = httpx.Timeout(
                 connect=5.0,
-                read=10.0,
+                read=self.config.request_timeout,
                 write=10.0,
                 pool=10.0,
             )
 
             limits = httpx.Limits(
-                max_connections=self._DEFAULT_MAX_CONNECTIONS,
-                max_keepalive_connections=self._DEFAULT_MAX_CONNECTIONS,
+                max_connections=self.config.max_connections,
+                max_keepalive_connections=self.config.max_connections,
             )
 
             self._client = httpx.AsyncClient(

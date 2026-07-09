@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import threading
 import time
+from pathlib import Path
 
 from acubed.application.ingestion.engine import GameIngestionEngine
 from acubed.application.persistence.repository import (
@@ -16,7 +16,16 @@ from acubed.application.persistence.repository import (
 )
 from acubed.infrastructure.environment.secrets import get_required_secrets
 from acubed.infrastructure.environment.types import is_databricks_environment
-from acubed.infrastructure.logging import get_logger, log_event
+from acubed.infrastructure.logging import (
+    close_progress,
+    console_info,
+    console_svg_logo,
+    finish_progress,
+    get_logger,
+    log_event,
+    set_progress_message,
+    set_progress_status,
+)
 from acubed.utils import (
     api_assets_to_bronze_tables,
     chart_refs_to_bronze_tables,
@@ -41,53 +50,36 @@ def _bronze_batch_size(game_id: str) -> int:
         # Local: 100 (faster feedback, lower memory)
         default = 1000 if is_databricks_environment(env) else 100
 
-    return max(int(os.getenv("BRONZE_BATCH_SIZE", default)), 1)
+    return max(default, 1)
 
 
 def _heartbeat_interval() -> float:
-    return max(float(os.getenv("ACUBED_HEARTBEAT_SECONDS", "30")), 0)
+    return 0.0
 
 
 def _skip_existing_source_enabled(game_id: str) -> bool:
-    game_key = game_id.upper().replace("-", "_")
-    game_value = os.getenv(f"{game_key}_SKIP_EXISTING_SOURCE")
-    global_value = os.getenv("ACUBED_SKIP_EXISTING_SOURCE")
-
-    if game_value is not None:
-        return game_value.strip().lower() not in {"0", "false", "no"}
-    if global_value is not None:
-        return global_value.strip().lower() in {"1", "true", "yes"}
-
     return game_id in {"etterna", "osumania"}
 
 
 def _sync_asset_charts_enabled(game_id: str) -> bool:
-    game_key = game_id.upper().replace("-", "_")
-    game_value = os.getenv(f"{game_key}_SYNC_ASSET_CHARTS")
-    global_value = os.getenv("ACUBED_SYNC_ASSET_CHARTS")
-
-    if game_value is not None:
-        return game_value.strip().lower() in {"1", "true", "yes"}
-    if global_value is not None:
-        return global_value.strip().lower() in {"1", "true", "yes"}
-
     return game_id not in {"etterna", "osumania"}
 
 
 def _stage_source_sync_enabled(game_id: str, environment) -> bool:
-    game_key = game_id.upper().replace("-", "_")
-    game_value = os.getenv(f"{game_key}_STAGE_SOURCE_SYNC")
-    global_value = os.getenv("ACUBED_STAGE_SOURCE_SYNC")
-
-    if game_value is not None:
-        return game_value.strip().lower() not in {"0", "false", "no"}
-    if global_value is not None:
-        return global_value.strip().lower() in {"1", "true", "yes"}
-
     return game_id in {
         "etterna",
         "osumania",
     } and not is_databricks_environment(environment)
+
+
+def _plugin_logo_path(game_id: str) -> Path:
+    return (
+        Path(__file__).resolve().parents[2]
+        / "plugins"
+        / game_id
+        / "assets"
+        / "logo.svg"
+    )
 
 
 def _existing_nonempty_source_ids(storage, table_config, logger) -> set[str]:
@@ -147,10 +139,9 @@ async def async_main(game_id: str | None = None) -> None:
 
     start_time = time.time()
     logger = get_logger()
+    progress_finished = False
 
-    logger.info("=" * 80)
-    logger.info("ACUBED INGESTION PIPELINE STARTED")
-    logger.info("=" * 80)
+    console_info("ACubed ingest starting")
 
     heartbeat_interval = _heartbeat_interval()
     heartbeat_stop = threading.Event()
@@ -198,6 +189,8 @@ async def async_main(game_id: str | None = None) -> None:
         # single source of truth for config + game resolution
         app = ApplicationContext(game_override=game_id)
         game = app.runtime.game
+        console_svg_logo(_plugin_logo_path(game.id), title=game.name)
+        set_progress_status("Initializing ingestion", 0.0)
 
         log_event(
             logger,
@@ -211,6 +204,7 @@ async def async_main(game_id: str | None = None) -> None:
 
         heartbeat_state["phase"] = "loading_secrets"
         heartbeat_state["action"] = "load_required_secrets"
+        set_progress_status("Loading secrets", 0.02)
         log_event(
             logger,
             "secrets",
@@ -263,6 +257,7 @@ async def async_main(game_id: str | None = None) -> None:
             repository = ChartsRepository(storage, table_config, logger)
 
         if stage_source_sync and hasattr(storage, "drop_table"):
+            set_progress_status("Preparing source staging", 0.04)
             heartbeat_state["phase"] = "source_stage_prepare"
             heartbeat_state["action"] = "drop_existing_source_staging_table"
             log_event(
@@ -283,6 +278,7 @@ async def async_main(game_id: str | None = None) -> None:
 
         skip_source_ids: set[str] = set()
         if _skip_existing_source_enabled(game.id):
+            set_progress_status("Checking existing source rows", 0.06)
             heartbeat_state["phase"] = "checking_existing_source"
             heartbeat_state["action"] = "read_existing_nonempty_source_ids"
             check_start = time.time()
@@ -398,6 +394,7 @@ async def async_main(game_id: str | None = None) -> None:
             )
 
         update_heartbeat("streaming", "consume_ingestion_events")
+        set_progress_status("Fetching source metadata", 0.08)
         async for event_type, payload in engine.stream():
             heartbeat_state["last_event"] = event_type
             if event_type == "collections":
@@ -418,13 +415,18 @@ async def async_main(game_id: str | None = None) -> None:
             )
             update_heartbeat(f"received_{event_type}", f"handle_{event_type}")
             if event_type in {"collections", "chart_refs"}:
+                set_progress_message("Writing metadata to bronze")
                 flush_pending()
             elif len(pending_assets) >= batch_size:
+                set_progress_message("Writing source rows to bronze")
                 flush_pending()
 
+        set_progress_message("Finalizing bronze writes")
         flush_pending()
+        set_progress_status("Finalizing bronze writes", 0.94)
 
         if stage_source_sync:
+            set_progress_status("Merging staged source rows", 0.96)
             update_heartbeat("source_stage_merge", "merge_staged_source_rows")
             log_event(
                 logger,
@@ -445,6 +447,7 @@ async def async_main(game_id: str | None = None) -> None:
             )
 
         if is_databricks_environment(app.environment) and loaded_assets:
+            set_progress_status("Optimizing bronze tables", 0.98)
             update_heartbeat("optimize", "optimize_bronze_delta_tables")
             log_event(
                 logger, "optimize", status="starting", target="bronze_tables"
@@ -471,12 +474,14 @@ async def async_main(game_id: str | None = None) -> None:
             elapsed_seconds=elapsed,
         )
 
-        logger.info("=" * 80)
-        logger.info("INGESTION COMPLETED IN %.2f SECONDS", elapsed)
-        logger.info("=" * 80)
+        finish_progress("Ingestion complete")
+        progress_finished = True
+        console_info("ACubed ingest completed in %.2fs", elapsed)
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=5)
+        if not progress_finished:
+            close_progress()
 
 
 def main() -> None:

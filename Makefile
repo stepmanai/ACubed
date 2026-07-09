@@ -43,8 +43,8 @@ remove-venv:
 remove-cache:
 	find . \
 		-type d \
-		-name "*cache" \
-		-not -path "./acubed/cache" \
+		-name "*.cache" \
+		-not -path "./acubed/.cache" \
 		-exec rm -rf {} +
 
 remove-data:

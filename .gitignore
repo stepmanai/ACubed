@@ -5,8 +5,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 data/
-cache/
+.cache/
 models/
 *.duckdb
 *.duckdb.wal
 credentials.json
+.env

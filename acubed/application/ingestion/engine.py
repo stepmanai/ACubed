@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import time
 
-from tqdm import tqdm
-
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.definition import GameDefinition
-from acubed.infrastructure.logging import get_logger, log_event
+from acubed.infrastructure.logging import (
+    get_logger,
+    log_event,
+    progress_bar,
+    set_progress_phase,
+)
 
 AssetResult = tuple[ChartRef, AssetResponse]
 BronzeEvent = tuple[str, list[Pack] | list[ChartRef] | list[AssetResult]]
@@ -57,10 +60,10 @@ class GameIngestionEngine:
 
         resolver = getattr(source, "resolve_pack_name", None)
 
-        for task in tqdm(
+        for task in progress_bar(
             asyncio.as_completed(tasks),
             total=len(tasks),
-            desc="Packs",
+            desc="Fetching chart collections",
             unit="pack",
         ):
             pack, pack_charts = await task
@@ -70,7 +73,6 @@ class GameIngestionEngine:
             else:
                 pack_name = pack.name
 
-            self.logger.info("%s: %d charts", pack_name, len(pack_charts))
             log_event(
                 self.logger,
                 "pack_charts",
@@ -118,10 +120,10 @@ class GameIngestionEngine:
         tasks = [fetch_chart(chart) for chart in charts]
         results: list[AssetResult] = []
 
-        for coro in tqdm(
+        for coro in progress_bar(
             asyncio.as_completed(tasks),
             total=len(tasks),
-            desc="Charts",
+            desc="Downloading source files",
             unit="chart",
         ):
             results.append(await coro)
@@ -172,7 +174,11 @@ class GameIngestionEngine:
 
         stream_many = getattr(source, "stream_many", None)
         if callable(stream_many):
-            progress = tqdm(total=len(charts), desc="Charts", unit="chart")
+            progress = progress_bar(
+                total=len(charts),
+                desc="Ingesting source files",
+                unit="chart",
+            )
             try:
                 async for batch in stream_many(
                     charts,
@@ -195,10 +201,10 @@ class GameIngestionEngine:
         tasks = [asyncio.create_task(fetch_chart(chart)) for chart in charts]
 
         try:
-            for task in tqdm(
+            for task in progress_bar(
                 asyncio.as_completed(tasks),
                 total=len(tasks),
-                desc="Charts",
+                desc="Downloading source files",
                 unit="chart",
             ):
                 yield [await task]
@@ -277,6 +283,7 @@ class GameIngestionEngine:
 
         try:
             phase_start = time.perf_counter()
+            set_progress_phase("Fetching source collections", 0.08, 0.12)
             log_event(
                 self.logger,
                 "fetch_packs",
@@ -294,6 +301,7 @@ class GameIngestionEngine:
             yield "collections", self._collection_rows_for_packs(packs)
 
             phase_start = time.perf_counter()
+            set_progress_phase("Fetching chart metadata", 0.12, 0.18)
             log_event(
                 self.logger,
                 "fetch_chart_refs",
@@ -315,6 +323,7 @@ class GameIngestionEngine:
 
             phase_start = time.perf_counter()
             downloaded = 0
+            set_progress_phase("Ingesting source files", 0.18, 0.86)
             log_event(
                 self.logger,
                 "fetch_assets",

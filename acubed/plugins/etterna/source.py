@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
-import os
+import json
 import random
 import re
 import struct
@@ -20,8 +20,7 @@ from acubed.application.ingestion.assets import empty_asset_response
 from acubed.application.ingestion.async_utils import iter_completed_tasks
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.protocols import ChartSource
-from acubed.infrastructure.environment.variables import env_int
-from acubed.infrastructure.logging import get_logger
+from acubed.infrastructure.logging import get_logger, progress_bar
 
 from .config import EtternaConfig
 
@@ -29,27 +28,13 @@ from .config import EtternaConfig
 class EtternaRemoteSource(ChartSource):
     supports_assets = True
 
-    _MAX_RETRIES = 5
-    _DEFAULT_MAX_CONNECTIONS = env_int(
-        "ETTERNA_MAX_CONNECTIONS", 64, minimum=1
-    )
-    _PAGE_CONCURRENCY = env_int("ETTERNA_PAGE_CONCURRENCY", 16, minimum=1)
     _PACK_PAGE_LIMIT = 5000
     _SONG_PAGE_LIMIT = 1000
-    _PACK_ASSET_CONCURRENCY = env_int(
-        "ETTERNA_PACK_ASSET_CONCURRENCY",
-        4,
-        minimum=1,
-    )
-    _SM_FETCH_CONCURRENCY = env_int(
-        "ETTERNA_SM_FETCH_CONCURRENCY",
-        6,
-        minimum=1,
-    )
     _RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
     _ZIP_TAIL_READ_SIZE = 65557
     _LOG_SLOW_PACK_SECONDS = 10.0
-    _PROGRESS_LOG_SECONDS = 30.0
+    _GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+    _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
     def __init__(self, config: EtternaConfig):
         self.config = config
@@ -61,16 +46,24 @@ class EtternaRemoteSource(ChartSource):
         self._pack_sm_cache: dict[str, dict[str, list[dict]]] = {}
         self._sm_file_cache: dict[tuple[str, str], bytes] = {}
         self._sm_chart_cache: dict[tuple[str, str], bytes] = {}
+        self._data_sm_cache: dict[str, list[dict]] | None = None
+        self._google_access_token: str | None = None
+        self._google_access_token_expires_at = 0.0
         self._pack_locks: dict[str, asyncio.Lock] = {}
         self._logger = get_logger()
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=5, read=15, write=15, pool=15),
+                timeout=httpx.Timeout(
+                    connect=5,
+                    read=self.config.request_timeout,
+                    write=15,
+                    pool=15,
+                ),
                 limits=httpx.Limits(
-                    max_connections=self._DEFAULT_MAX_CONNECTIONS,
-                    max_keepalive_connections=self._DEFAULT_MAX_CONNECTIONS,
+                    max_connections=self.config.max_connections,
+                    max_keepalive_connections=self.config.max_connections,
                 ),
             )
         return self._client
@@ -79,6 +72,312 @@ class EtternaRemoteSource(ChartSource):
         if self._client:
             await self._client.aclose()
             self._client = None
+
+    @staticmethod
+    def _b64url(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    def _google_credentials(self) -> dict:
+        path = self.config.google_credentials_path
+        if not path:
+            raise ValueError("Etterna Google Drive credentials path is empty.")
+
+        credentials_path = Path(path)
+        if not credentials_path.exists():
+            raise FileNotFoundError(
+                f"Etterna Google Drive credentials not found: {path}"
+            )
+
+        return json.loads(credentials_path.read_text(encoding="utf-8"))
+
+    def _google_drive_token(self) -> str:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        now = time.time()
+        if (
+            self._google_access_token
+            and now < self._google_access_token_expires_at - 60
+        ):
+            return self._google_access_token
+
+        credentials = self._google_credentials()
+        token_uri = credentials.get("token_uri") or self._GOOGLE_TOKEN_URL
+        issued_at = int(now)
+        claims = {
+            "iss": credentials["client_email"],
+            "scope": self._GOOGLE_DRIVE_SCOPE,
+            "aud": token_uri,
+            "iat": issued_at,
+            "exp": issued_at + 3600,
+        }
+        header = {"alg": "RS256", "typ": "JWT"}
+        signing_input = ".".join(
+            (
+                self._b64url(
+                    json.dumps(header, separators=(",", ":")).encode("utf-8")
+                ),
+                self._b64url(
+                    json.dumps(claims, separators=(",", ":")).encode("utf-8")
+                ),
+            )
+        ).encode("ascii")
+
+        private_key = serialization.load_pem_private_key(
+            credentials["private_key"].encode("utf-8"),
+            password=None,
+        )
+        signature = private_key.sign(
+            signing_input,
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+        assertion = (
+            f"{signing_input.decode('ascii')}.{self._b64url(signature)}"
+        )
+
+        with httpx.Client(
+            timeout=self.config.data_archive_timeout,
+            follow_redirects=True,
+        ) as client:
+            response = client.post(
+                token_uri,
+                data={
+                    "grant_type": (
+                        "urn:ietf:params:oauth:grant-type:jwt-bearer"
+                    ),
+                    "assertion": assertion,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+        self._google_access_token = payload["access_token"]
+        self._google_access_token_expires_at = now + int(
+            payload.get("expires_in", 3600)
+        )
+        return self._google_access_token
+
+    def _google_drive_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._google_drive_token()}"}
+
+    def _latest_drive_archive(self) -> dict:
+        folder_id = self.config.google_drive_folder_id
+        query = (
+            f"'{folder_id}' in parents and trashed = false "
+            "and mimeType != 'application/vnd.google-apps.folder'"
+        )
+        params = {
+            "q": query,
+            "fields": (
+                "files(id,name,mimeType,size,modifiedTime),nextPageToken"
+            ),
+            "pageSize": 1000,
+            "orderBy": "modifiedTime desc",
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
+
+        files: list[dict] = []
+        with httpx.Client(
+            timeout=self.config.data_archive_timeout,
+            follow_redirects=True,
+        ) as client:
+            while True:
+                response = client.get(
+                    "https://www.googleapis.com/drive/v3/files",
+                    headers=self._google_drive_headers(),
+                    params=params,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                files.extend(payload.get("files", []))
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    break
+                params["pageToken"] = page_token
+
+        archives = [
+            file
+            for file in files
+            if str(file.get("name") or "").casefold().endswith(".zip")
+        ]
+        if not archives:
+            raise ValueError(
+                "No .zip files were found in the configured Etterna "
+                "Google Drive folder."
+            )
+
+        return max(
+            archives,
+            key=lambda file: str(file.get("modifiedTime") or ""),
+        )
+
+    @staticmethod
+    def _safe_cache_name(name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+        return safe or "etterna_data.zip"
+
+    def _data_cache_paths(
+        self, archive: dict
+    ) -> tuple[Path, Path, Path, Path]:
+        cache_root = Path(self.config.data_cache_dir)
+        archive_name = self._safe_cache_name(str(archive.get("name") or ""))
+        archive_path = cache_root / archive_name
+        extract_dir = cache_root / archive_path.stem
+        index_path = extract_dir / ".acubed_sm_index.json"
+        complete_marker = extract_dir / ".acubed_complete"
+        return archive_path, extract_dir, index_path, complete_marker
+
+    def _download_drive_archive_to_cache(
+        self,
+        archive: dict,
+        archive_path: Path,
+    ) -> None:
+        if archive_path.exists() and archive_path.stat().st_size > 0:
+            return
+
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = archive_path.with_suffix(archive_path.suffix + ".part")
+        file_id = archive["id"]
+        total_bytes = int(archive.get("size") or 0)
+
+        with httpx.Client(
+            timeout=self.config.data_archive_timeout,
+            follow_redirects=True,
+        ) as client:
+            with client.stream(
+                "GET",
+                f"https://www.googleapis.com/drive/v3/files/{file_id}",
+                headers=self._google_drive_headers(),
+                params={
+                    "alt": "media",
+                    "supportsAllDrives": "true",
+                },
+            ) as response:
+                response.raise_for_status()
+                progress = progress_bar(
+                    total=total_bytes or None,
+                    desc="Downloading source cache",
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                )
+                with temp_path.open("wb") as output:
+                    try:
+                        for chunk in response.iter_bytes(1024 * 1024):
+                            output.write(chunk)
+                            progress.update(len(chunk))
+                    finally:
+                        progress.close()
+
+        temp_path.replace(archive_path)
+
+    def _safe_cache_target(self, extract_dir: Path, member_name: str) -> Path:
+        root = extract_dir.resolve()
+        target = (extract_dir / member_name).resolve()
+        if root not in target.parents and target != root:
+            raise ValueError(
+                f"Unsafe Etterna archive member path: {member_name}"
+            )
+        return target
+
+    def _load_data_sm_index(self, index_path: Path) -> dict[str, list[dict]]:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+        return {
+            key: list(value)
+            for key, value in data.items()
+            if isinstance(value, list)
+        }
+
+    def _write_data_sm_index(
+        self,
+        index_path: Path,
+        index: dict[str, list[dict]],
+    ) -> None:
+        index_path.write_text(
+            json.dumps(index, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+    def _extract_drive_archive_to_cache(
+        self,
+        archive_path: Path,
+        extract_dir: Path,
+        index_path: Path,
+        complete_marker: Path,
+    ) -> dict[str, list[dict]]:
+        if complete_marker.exists() and index_path.exists():
+            return self._load_data_sm_index(index_path)
+
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        index: dict[str, list[dict]] = {}
+        with zipfile.ZipFile(archive_path) as archive:
+            entries = [
+                entry for entry in archive.infolist() if not entry.is_dir()
+            ]
+            progress = progress_bar(
+                total=len(entries),
+                desc="Extracting source cache",
+                unit="file",
+            )
+            try:
+                for entry in entries:
+                    progress.update(1)
+                    path = Path(entry.filename)
+                    if not path.name.casefold().endswith(".sm"):
+                        continue
+
+                    target = self._safe_cache_target(
+                        extract_dir,
+                        entry.filename,
+                    )
+                    target.parent.mkdir(parents=True, exist_ok=True)
+
+                    with archive.open(entry) as source:
+                        raw = source.read()
+                    target.write_bytes(raw)
+
+                    self._index_sm_file(
+                        index,
+                        path.name,
+                        path.parent.name,
+                        self._sm_metadata(raw),
+                        source_path=entry.filename,
+                        notes_blocks=self._sm_notes_blocks(self._sm_text(raw)),
+                        local_path=str(target),
+                    )
+            finally:
+                progress.close()
+
+        self._write_data_sm_index(index_path, index)
+        complete_marker.write_text(str(time.time()), encoding="utf-8")
+        return index
+
+    async def _data_sm_files(self) -> dict[str, list[dict]]:
+        if self._data_sm_cache is not None:
+            return self._data_sm_cache
+
+        loop = asyncio.get_running_loop()
+        archive = await loop.run_in_executor(None, self._latest_drive_archive)
+        archive_path, extract_dir, index_path, complete_marker = (
+            self._data_cache_paths(archive)
+        )
+        await loop.run_in_executor(
+            None,
+            self._download_drive_archive_to_cache,
+            archive,
+            archive_path,
+        )
+        self._data_sm_cache = await loop.run_in_executor(
+            None,
+            self._extract_drive_archive_to_cache,
+            archive_path,
+            extract_dir,
+            index_path,
+            complete_marker,
+        )
+        return self._data_sm_cache
 
     def _retry_delay(
         self, attempt: int, response: httpx.Response | None = None
@@ -96,7 +395,7 @@ class EtternaRemoteSource(ChartSource):
         client = self._get_client()
         url = urljoin(f"{self.config.base_api_url.rstrip('/')}/", path)
 
-        for attempt in range(self._MAX_RETRIES):
+        for attempt in range(self.config.max_retries):
             response = None
             try:
                 response = await client.get(url, params=params)
@@ -111,7 +410,7 @@ class EtternaRemoteSource(ChartSource):
                     raise ValueError(f"EMPTY RESPONSE: {url}")
                 return response.json()
             except (TimeoutError, httpx.HTTPError, ValueError):
-                if attempt == self._MAX_RETRIES - 1:
+                if attempt == self.config.max_retries - 1:
                     raise
                 await asyncio.sleep(self._retry_delay(attempt, response))
 
@@ -129,7 +428,7 @@ class EtternaRemoteSource(ChartSource):
         last_page = int(first.get("meta", {}).get("last_page", 1) or 1)
 
         if last_page > 1:
-            sem = asyncio.Semaphore(self._PAGE_CONCURRENCY)
+            sem = asyncio.Semaphore(self.config.page_concurrency)
 
             async def fetch_page(page: int):
                 async with sem:
@@ -215,7 +514,7 @@ class EtternaRemoteSource(ChartSource):
         **kwargs,
     ) -> httpx.Response:
         response = None
-        for attempt in range(self._MAX_RETRIES):
+        for attempt in range(self.config.max_retries):
             try:
                 response = await self._get_client().request(
                     method,
@@ -231,7 +530,7 @@ class EtternaRemoteSource(ChartSource):
                 response.raise_for_status()
                 return response
             except (TimeoutError, httpx.HTTPError):
-                if attempt == self._MAX_RETRIES - 1:
+                if attempt == self.config.max_retries - 1:
                     raise
                 await asyncio.sleep(self._retry_delay(attempt, response))
 
@@ -410,6 +709,7 @@ class EtternaRemoteSource(ChartSource):
         entry: dict | None = None,
         raw: bytes | None = None,
         source_path: str | None = None,
+        local_path: str | None = None,
         notes_blocks: list[dict] | None = None,
     ) -> None:
         base_name = Path(file_name).name
@@ -424,6 +724,7 @@ class EtternaRemoteSource(ChartSource):
             "notes_blocks": notes_blocks or [],
             "entry": entry,
             "raw": raw,
+            "local_path": local_path,
         }
         candidates = [
             base_name,
@@ -640,7 +941,7 @@ class EtternaRemoteSource(ChartSource):
         self, url: str
     ) -> dict[str, str]:
         index: dict[str, str] = {}
-        sem = asyncio.Semaphore(self._SM_FETCH_CONCURRENCY)
+        sem = asyncio.Semaphore(self.config.sm_fetch_concurrency)
 
         async def index_entry(entry: dict) -> None:
             path = Path(entry["name"])
@@ -669,7 +970,7 @@ class EtternaRemoteSource(ChartSource):
         try:
             return await self._index_ranged_pack_zip_sm_files(url)
         except (httpx.HTTPError, ValueError, zlib.error, struct.error):
-            if os.getenv("ETTERNA_ALLOW_FULL_ZIP_FALLBACK") == "1":
+            if self.config.allow_full_zip_fallback:
                 return await self._index_full_pack_zip_sm_files(url)
             raise
 
@@ -717,6 +1018,54 @@ class EtternaRemoteSource(ChartSource):
 
         return best_item
 
+    def _resolve_sm_item_from_index(
+        self,
+        index: dict[str, list[dict]],
+        metadata: dict,
+    ) -> dict | None:
+        normalized_song = self._normalize_lookup_name(metadata.get("name"))
+        candidates = index.get(normalized_song) or []
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        scored = [
+            (self._sm_item_score(item, metadata), item) for item in candidates
+        ]
+        scored.sort(key=lambda item: item[0], reverse=True)
+
+        best_score, best_item = scored[0]
+        if best_score <= 0:
+            return None
+        if len(scored) > 1 and best_score == scored[1][0]:
+            return None
+
+        return best_item
+
+    async def _asset_from_data_cache(
+        self,
+        chart: ChartRef,
+        index: dict[str, list[dict]],
+    ) -> tuple[ChartRef, AssetResponse] | None:
+        metadata = dict(chart.raw_payload or {})
+        metadata.setdefault("id", chart.id)
+        item = self._resolve_sm_item_from_index(index, metadata)
+        if item is None:
+            return None
+
+        raw = await self._read_sm_item(chart.pack_id, item)
+        chart_bytes = self._chart_sm_bytes(raw, metadata)
+        if not chart_bytes:
+            return None
+
+        metadata["source_file_name"] = str(item.get("file_name") or "")
+        return chart, AssetResponse(
+            metadata=metadata,
+            raw_chart=chart_bytes,
+            raw_payload={**metadata, "chart": chart_bytes},
+        )
+
     async def _read_sm_item(self, pack_id: str, item: dict) -> bytes:
         source_path = str(
             item.get("source_path") or item.get("file_name") or ""
@@ -730,6 +1079,15 @@ class EtternaRemoteSource(ChartSource):
             if source_path:
                 self._sm_file_cache[cache_key] = raw
             return raw
+
+        local_path = item.get("local_path")
+        if local_path:
+            path = Path(str(local_path))
+            if path.exists():
+                raw = path.read_bytes()
+                if source_path:
+                    self._sm_file_cache[cache_key] = raw
+                return raw
 
         entry = item.get("entry")
         if not entry:
@@ -966,6 +1324,84 @@ class EtternaRemoteSource(ChartSource):
                 if key[0] == pack_id:
                     self._sm_chart_cache.pop(key, None)
 
+    async def _stream_data_cache_assets(
+        self,
+        charts: list[ChartRef],
+        secrets: dict,
+        *,
+        concurrency: int,
+    ):
+        index = await self._data_sm_files()
+        batch: list[tuple[ChartRef, AssetResponse]] = []
+        missing: list[ChartRef] = []
+        batch_size = max(self.config.direct_batch_size, 1)
+
+        progress = progress_bar(
+            total=len(charts),
+            desc="Reading source cache",
+            unit="chart",
+        )
+        try:
+            for chart in charts:
+                result = await self._asset_from_data_cache(chart, index)
+                if result is None:
+                    missing.append(chart)
+                else:
+                    batch.append(result)
+
+                progress.update(1)
+                if len(batch) >= batch_size:
+                    yield batch
+                    batch = []
+        finally:
+            progress.close()
+
+        if missing and self.config.direct_fallback:
+            charts_by_pack: dict[str, list[ChartRef]] = defaultdict(list)
+            for chart in missing:
+                charts_by_pack[chart.pack_id].append(chart)
+
+            sem = asyncio.Semaphore(
+                max(min(concurrency, self.config.pack_asset_concurrency), 1)
+            )
+
+            async def fetch_pack(
+                pack_id: str,
+                pack_charts: list[ChartRef],
+            ) -> list[tuple[ChartRef, AssetResponse]]:
+                async with sem:
+                    return await self._fetch_pack_assets(
+                        pack_id,
+                        pack_charts,
+                        secrets,
+                    )
+
+            tasks = [
+                asyncio.create_task(fetch_pack(pack_id, pack_charts))
+                for pack_id, pack_charts in charts_by_pack.items()
+            ]
+            progress = progress_bar(
+                total=len(tasks),
+                desc="Downloading missing source files",
+                unit="pack",
+            )
+            try:
+                async for fallback_batch in iter_completed_tasks(tasks):
+                    progress.update(1)
+                    batch.extend(fallback_batch)
+                    if len(batch) >= batch_size:
+                        yield batch
+                        batch = []
+            finally:
+                progress.close()
+        else:
+            batch.extend(
+                (chart, empty_asset_response(chart)) for chart in missing
+            )
+
+        if batch:
+            yield batch
+
     async def stream_many(
         self,
         charts: list[ChartRef],
@@ -975,12 +1411,44 @@ class EtternaRemoteSource(ChartSource):
         if not self.supports_assets:
             return
 
+        asset_mode = self.config.asset_mode
+        if asset_mode == "auto":
+            asset_mode = (
+                "cache"
+                if len(charts) >= self.config.data_auto_min_charts
+                else "pack"
+            )
+
+        if asset_mode in {"cache", "data"}:
+            try:
+                async for batch in self._stream_data_cache_assets(
+                    charts,
+                    secrets,
+                    concurrency=concurrency,
+                ):
+                    yield batch
+                return
+            except (
+                FileNotFoundError,
+                httpx.HTTPError,
+                KeyError,
+                ValueError,
+                zipfile.BadZipFile,
+            ) as exc:
+                if not self.config.direct_fallback:
+                    raise
+                self._logger.warning(
+                    "Etterna data cache unavailable; falling back to pack "
+                    "ZIP extraction: %s",
+                    exc,
+                )
+
         charts_by_pack: dict[str, list[ChartRef]] = defaultdict(list)
         for chart in charts:
             charts_by_pack[chart.pack_id].append(chart)
 
         sem = asyncio.Semaphore(
-            max(min(concurrency, self._PACK_ASSET_CONCURRENCY), 1)
+            max(min(concurrency, self.config.pack_asset_concurrency), 1)
         )
 
         async def fetch_pack(
@@ -998,12 +1466,7 @@ class EtternaRemoteSource(ChartSource):
             asyncio.create_task(fetch_pack(pack_id, pack_charts))
             for pack_id, pack_charts in charts_by_pack.items()
         ]
-        heartbeat_seconds = float(
-            os.getenv(
-                "ETTERNA_PROGRESS_LOG_SECONDS",
-                self._PROGRESS_LOG_SECONDS,
-            )
-        )
+        heartbeat_seconds = self.config.progress_log_seconds
         async for result in iter_completed_tasks(
             tasks,
             heartbeat_seconds=heartbeat_seconds,

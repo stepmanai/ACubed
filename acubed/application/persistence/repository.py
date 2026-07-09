@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
@@ -318,7 +317,7 @@ class DatabricksStepfileRepository:
         self.storage = storage
         self.table_config = table_config
         self.logger = logger
-        self.workers = int(os.getenv("ACUBED_DATABRICKS_WORKERS", workers))
+        self.workers = workers
 
         required_methods = (
             # "distributed_api_assets_to_bronze_tables",

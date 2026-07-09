@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from acubed.infrastructure.environment.types import (
     Environment,
     is_databricks_environment,
@@ -28,10 +26,10 @@ def build_runtime_config(
     )
 
     return RuntimeConfig(
-        game=game_override or os.getenv("GAME", "ffr"),
-        thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", default_workers)),
-        request_timeout=int(os.getenv("REQUEST_TIMEOUT", 10)),
-        max_retries=int(os.getenv("MAX_RETRIES", 5)),
+        game=game_override or "ffr",
+        thread_pool_size=default_workers,
+        request_timeout=10,
+        max_retries=5,
     )
 
 
