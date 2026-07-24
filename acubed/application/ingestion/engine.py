@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 
 from acubed.domain.chart.types import AssetResponse, ChartRef, Pack
 from acubed.domain.game.definition import GameDefinition
+from acubed.domain.game.protocols import (
+    BulkAssetSource,
+    BulkPackChartSource,
+    PackNameResolver,
+    PackPayloadResolver,
+    StreamingAssetSource,
+)
 from acubed.infrastructure.logging import (
     get_logger,
     log_event,
@@ -13,7 +21,6 @@ from acubed.infrastructure.logging import (
 )
 
 AssetResult = tuple[ChartRef, AssetResponse]
-BronzeEvent = tuple[str, list[Pack] | list[ChartRef] | list[AssetResult]]
 
 
 class GameIngestionEngine:
@@ -35,12 +42,9 @@ class GameIngestionEngine:
         packs: list[Pack],
     ) -> list[ChartRef]:
         source = self.game.source
-        fetch_charts_for_packs = getattr(
-            source, "fetch_charts_for_packs", None
-        )
-        if callable(fetch_charts_for_packs):
+        if isinstance(source, BulkPackChartSource):
             return list(
-                await fetch_charts_for_packs(
+                await source.fetch_charts_for_packs(
                     packs,
                     secrets=self.secrets,
                     concurrency=self.concurrency,
@@ -58,8 +62,6 @@ class GameIngestionEngine:
 
         tasks = [asyncio.create_task(fetch_pack(pack)) for pack in packs]
 
-        resolver = getattr(source, "resolve_pack_name", None)
-
         for task in progress_bar(
             asyncio.as_completed(tasks),
             total=len(tasks),
@@ -68,10 +70,11 @@ class GameIngestionEngine:
         ):
             pack, pack_charts = await task
 
-            if resolver is not None:
-                pack_name = resolver(pack.id)
-            else:
-                pack_name = pack.name
+            pack_name = (
+                source.resolve_pack_name(pack.id)
+                if isinstance(source, PackNameResolver)
+                else pack.name
+            )
 
             log_event(
                 self.logger,
@@ -100,11 +103,8 @@ class GameIngestionEngine:
             )
             return []
 
-        fetch_many = getattr(source, "fetch_many", None)
-
-        if callable(fetch_many):
-            bulk_fetch = fetch_many
-            return await bulk_fetch(
+        if isinstance(source, BulkAssetSource):
+            return await source.fetch_many(
                 charts,
                 self.secrets,
                 concurrency=self.concurrency,
@@ -133,7 +133,7 @@ class GameIngestionEngine:
     async def _stream_assets(
         self,
         charts: list[ChartRef],
-    ):
+    ) -> AsyncIterator[list[AssetResult]]:
         source = self.game.source
         if getattr(source, "supports_assets", True) is False:
             log_event(
@@ -172,15 +172,14 @@ class GameIngestionEngine:
                 )
                 return
 
-        stream_many = getattr(source, "stream_many", None)
-        if callable(stream_many):
+        if isinstance(source, StreamingAssetSource):
             progress = progress_bar(
                 total=len(charts),
                 desc="Ingesting source files",
                 unit="chart",
             )
             try:
-                async for batch in stream_many(
+                async for batch in source.stream_many(
                     charts,
                     self.secrets,
                     concurrency=self.concurrency,
@@ -256,16 +255,15 @@ class GameIngestionEngine:
 
     def _collection_rows_for_packs(self, packs: list[Pack]) -> list[Pack]:
         source = self.game.source
-        resolver = getattr(source, "resolve_pack_payload", None)
-
-        if not callable(resolver):
+        if not isinstance(source, PackPayloadResolver):
             return packs
 
         return [
             Pack(
                 id=pack.id,
                 name=pack.name,
-                raw_payload=resolver(pack.id) or pack.raw_payload,
+                raw_payload=source.resolve_pack_payload(pack.id)
+                or pack.raw_payload,
             )
             for pack in packs
         ]

@@ -7,7 +7,8 @@ try:
 except ImportError:
 
     class StrEnum(enum.StrEnum):
-        pass
+        def __str__(self) -> str:
+            return self.value
 
 
 class Environment(StrEnum):

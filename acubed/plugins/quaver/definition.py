@@ -1,23 +1,18 @@
 # plugins/quaver/definition.py
 
-from acubed.domain.game.definition import GameDefinition
+from acubed.domain.game.plugin import GamePlugin
 from acubed.plugins.quaver.config import QuaverConfig
 from acubed.plugins.quaver.parser import QuaverChartParser
 from acubed.plugins.quaver.source import QuaverRemoteSource
 
 GAME_ID = "quaver"
 
-
-def build_game() -> GameDefinition:
-    config = QuaverConfig()
-
-    return GameDefinition(
-        id=GAME_ID,
-        name="Quaver",
-        config=config,
-        source=QuaverRemoteSource(config),
-        parser=QuaverChartParser(),
-    )
-
-
+PLUGIN = GamePlugin(
+    id=GAME_ID,
+    name="Quaver",
+    config_factory=QuaverConfig,
+    source_factory=QuaverRemoteSource,
+    parser_factory=QuaverChartParser,
+)
+build_game = PLUGIN.build
 build_quaver_game = build_game

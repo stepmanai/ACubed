@@ -24,6 +24,80 @@ class RemoteAssetIngestionConfig:
     progress_log_seconds: float
 
 
+class RemoteGameConfig:
+    """Compatibility accessors shared by remote game configurations."""
+
+    ingestion: RemoteAssetIngestionConfig
+
+    @property
+    def request_timeout(self) -> float:
+        return self.ingestion.request_timeout
+
+    @property
+    def archive_timeout(self) -> float:
+        return self.ingestion.archive_timeout
+
+    @property
+    def archive_max_members(self) -> int:
+        return self.ingestion.archive_max_members
+
+    @property
+    def cache_dir(self) -> str:
+        return self.ingestion.cache_dir
+
+    @property
+    def auto_min_charts(self) -> int:
+        return self.ingestion.auto_min_charts
+
+    @property
+    def max_connections(self) -> int:
+        return self.ingestion.max_connections
+
+    @property
+    def max_retries(self) -> int:
+        return self.ingestion.max_retries
+
+    @property
+    def chart_max_retries(self) -> int:
+        return self.ingestion.chart_max_retries
+
+    @property
+    def page_concurrency(self) -> int:
+        return self.ingestion.page_concurrency
+
+    @property
+    def pack_asset_concurrency(self) -> int:
+        return self.ingestion.pack_asset_concurrency
+
+    @property
+    def chart_asset_concurrency(self) -> int:
+        return self.ingestion.chart_asset_concurrency
+
+    @property
+    def extract_concurrency(self) -> int:
+        return self.ingestion.extract_concurrency
+
+    @property
+    def batch_size(self) -> int:
+        return self.ingestion.batch_size
+
+    @property
+    def direct_max_retries(self) -> int:
+        return self.ingestion.direct_max_retries
+
+    @property
+    def direct_fallback(self) -> bool:
+        return self.ingestion.direct_fallback
+
+    @property
+    def asset_mode(self) -> str:
+        return self.ingestion.asset_mode
+
+    @property
+    def progress_log_seconds(self) -> float:
+        return self.ingestion.progress_log_seconds
+
+
 def build_remote_asset_ingestion_config(
     *,
     cache_namespace: str,
@@ -48,7 +122,7 @@ def build_remote_asset_ingestion_config(
         request_timeout=request_timeout,
         archive_timeout=archive_timeout,
         archive_max_members=archive_max_members,
-        cache_dir=f".cache/{cache_namespace}",
+        cache_dir=f".cache/acubed/{cache_namespace}",
         auto_min_charts=auto_min_charts,
         max_connections=max_connections,
         max_retries=max_retries,
