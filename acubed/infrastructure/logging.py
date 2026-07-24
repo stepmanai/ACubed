@@ -2,17 +2,21 @@ from __future__ import annotations
 
 # infrastructure/logging.py
 import logging
-import math
+import os
 import re
+import select
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 _CONFIGURED = False
+_CHAFA_HINT_SHOWN = False
+_CHAFA_FAILURE_SHOWN = False
 
 try:
     from rich.console import Console
@@ -119,7 +123,7 @@ class _LiveProgressDisplay:
     def write(self, message: str, stream=None) -> None:
         with self._lock:
             if self._rich_progress is not None and self._console is not None:
-                self._console.print(message)
+                self._console.print(message, markup=False, highlight=False)
                 return
 
             stream = stream or self._stream
@@ -249,19 +253,20 @@ def console_svg_logo(
     terminal_width = shutil.get_terminal_size((100, 20)).columns
     art_width = max(24, min(width, terminal_width - 8))
 
-    chafa_art = _chafa_logo_art(
+    if not svg_path.exists():
+        return
+
+    if shutil.which("chafa") is None:
+        _write_chafa_install_hint(terminal_width, padding=padding)
+        return
+
+    chafa_output = _chafa_logo_art(
         svg_path,
         width=art_width,
         height=height,
         cell_aspect_ratio=cell_aspect_ratio,
     )
-    art = chafa_art or _svg_ascii_art(
-        svg_path,
-        width=art_width,
-        height=height,
-        cell_aspect_ratio=cell_aspect_ratio,
-    )
-    if not art:
+    if not chafa_output:
         return
 
     lines = []
@@ -269,7 +274,28 @@ def console_svg_logo(
     if title:
         lines.append(_center_terminal_line(title, terminal_width))
         lines.append("")
-    lines.extend(_center_terminal_line(line, terminal_width) for line in art)
+    lines.append(
+        _center_terminal_block(chafa_output, terminal_width, ansi=True)
+    )
+    lines.extend("" for _ in range(max(padding, 0)))
+    _write_terminal_graphics("\n".join(lines))
+
+
+def _write_chafa_install_hint(terminal_width: int, *, padding: int) -> None:
+    global _CHAFA_HINT_SHOWN
+
+    if _CHAFA_HINT_SHOWN:
+        return
+
+    _CHAFA_HINT_SHOWN = True
+    lines = []
+    lines.extend("" for _ in range(max(padding, 0)))
+    lines.append(
+        _center_terminal_line(
+            "Install chafa for logo rendering: sudo apt install chafa",
+            terminal_width,
+        )
+    )
     lines.extend("" for _ in range(max(padding, 0)))
     _LIVE_PROGRESS.write("\n".join(lines))
 
@@ -280,10 +306,10 @@ def _chafa_logo_art(
     width: int,
     height: int | None,
     cell_aspect_ratio: float,
-) -> list[str]:
+) -> str:
     chafa = shutil.which("chafa")
     if not chafa or not path.exists():
-        return []
+        return ""
 
     if height is None:
         view_box = _svg_file_view_box(path)
@@ -296,21 +322,286 @@ def _chafa_logo_art(
                 round(width * (box_height / box_width) / cell_aspect_ratio),
             )
 
-    command = [
-        chafa,
-        "--size",
-        f"{width}x{height}",
-        "--center",
-        "off",
-        "--stretch",
-        "off",
-        "--animate",
-        "off",
-        "--polite",
-        "on",
-        str(path),
+    input_path = path
+    temp_png = _rasterize_svg_logo(path, width=width, height=height)
+    if temp_png is not None:
+        input_path = temp_png
+
+    commands = [
+        [
+            chafa,
+            "-f",
+            "symbols",
+            "-s",
+            f"{width}x{height}",
+            "--symbols",
+            "block+space",
+            "-c",
+            _chafa_color_mode(),
+            "--color-space",
+            "rgb",
+            "--dither",
+            "diffusion",
+            "-w",
+            "9",
+            str(input_path),
+        ],
+        [
+            chafa,
+            "-f",
+            "symbols",
+            "-s",
+            f"{width}x{height}",
+            "--symbols",
+            "block+space",
+            "-c",
+            "16",
+            str(input_path),
+        ],
+        [
+            chafa,
+            "-f",
+            "symbols",
+            "-s",
+            f"{width}x{height}",
+            "--symbols",
+            "block+space",
+            str(input_path),
+        ],
+        [
+            chafa,
+            "-s",
+            f"{width}x{height}",
+            str(input_path),
+        ],
+        [
+            chafa,
+            str(input_path),
+        ],
     ]
 
+    try:
+        completed = subprocess.CompletedProcess(
+            commands[-1],
+            1,
+            "",
+            "chafa did not run",
+        )
+        for command in commands:
+            completed = _run_chafa_command(command)
+            if completed.returncode == 0 and completed.stdout:
+                break
+
+        if completed.returncode != 0:
+            _write_chafa_failure_hint(
+                _chafa_failure_reason(completed.stderr, path)
+            )
+            return ""
+
+        if not completed.stdout:
+            _write_chafa_failure_hint("chafa produced no terminal output")
+            return ""
+
+        return completed.stdout
+    finally:
+        if temp_png is not None:
+            try:
+                temp_png.unlink()
+            except OSError:
+                pass
+
+
+def _write_terminal_graphics(output: str) -> None:
+    _LIVE_PROGRESS.close()
+    stream = getattr(sys, "stderr", None) or sys.stdout
+    stream.write(f"{output.rstrip()}\n")
+    stream.flush()
+
+
+def _rasterize_svg_logo(path: Path, *, width: int, height: int) -> Path | None:
+    if path.suffix.casefold() != ".svg":
+        return None
+
+    render_width = max(width * 12, 128)
+    render_height = max(height * 24, 128)
+    source = _terminal_svg_source(path)
+    output = Path(
+        tempfile.NamedTemporaryFile(
+            prefix="acubed-logo-",
+            suffix=".png",
+            delete=False,
+        ).name
+    )
+
+    commands = _svg_rasterizer_commands(
+        source,
+        output,
+        width=render_width,
+        height=render_height,
+    )
+    try:
+        for command in commands:
+            completed = _run_plain_command(command)
+            if (
+                completed.returncode == 0
+                and output.exists()
+                and output.stat().st_size
+            ):
+                return output
+    finally:
+        if source != path:
+            try:
+                source.unlink()
+            except OSError:
+                pass
+
+    try:
+        output.unlink()
+    except OSError:
+        pass
+    return None
+
+
+def _terminal_svg_source(path: Path) -> Path:
+    try:
+        svg = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return path
+
+    svg = re.sub(r"fill\s*:\s*#(?:000|000000)\b", "fill:#ffffff", svg)
+    svg = re.sub(r'fill=(["\'])#(?:000|000000)\1', r"fill=\1#ffffff\1", svg)
+    svg = re.sub(r"rgb\(\s*0\s*,\s*0\s*,\s*0\s*\)", "rgb(255,255,255)", svg)
+    svg = re.sub(r"(?i)\bblack\b", "#ffffff", svg)
+
+    match = re.search(r"<svg\b[^>]*>", svg)
+    if match is None:
+        return path
+
+    tag = match.group(0)
+    if "style=" in tag:
+        tag = re.sub(
+            r'style=(["\'])(.*?)\1',
+            lambda found: (
+                f"style={found.group(1)}"
+                f"color:#ffffff;fill:#ffffff;{found.group(2)}"
+                f"{found.group(1)}"
+            ),
+            tag,
+            count=1,
+        )
+    else:
+        tag = tag[:-1] + ' style="color:#ffffff;fill:#ffffff">'
+    svg = svg[: match.start()] + tag + svg[match.end() :]
+
+    output = Path(
+        tempfile.NamedTemporaryFile(
+            prefix="acubed-logo-",
+            suffix=".svg",
+            delete=False,
+        ).name
+    )
+    try:
+        output.write_text(svg, encoding="utf-8")
+    except OSError:
+        try:
+            output.unlink()
+        except OSError:
+            pass
+        return path
+    return output
+
+
+def _svg_rasterizer_commands(
+    source: Path,
+    output: Path,
+    *,
+    width: int,
+    height: int,
+) -> list[list[str]]:
+    commands = []
+    rsvg_convert = shutil.which("rsvg-convert")
+    if rsvg_convert:
+        commands.append(
+            [
+                rsvg_convert,
+                "-w",
+                str(width),
+                "-h",
+                str(height),
+                "-o",
+                str(output),
+                str(source),
+            ]
+        )
+
+    inkscape = shutil.which("inkscape")
+    if inkscape:
+        commands.append(
+            [
+                inkscape,
+                str(source),
+                "--export-type=png",
+                f"--export-filename={output}",
+                f"--export-width={width}",
+                f"--export-height={height}",
+            ]
+        )
+
+    magick = shutil.which("magick")
+    if magick:
+        commands.append(
+            [
+                magick,
+                "-background",
+                "none",
+                str(source),
+                "-resize",
+                f"{width}x{height}",
+                str(output),
+            ]
+        )
+
+    convert = shutil.which("convert")
+    if convert:
+        commands.append(
+            [
+                convert,
+                "-background",
+                "none",
+                str(source),
+                "-resize",
+                f"{width}x{height}",
+                str(output),
+            ]
+        )
+
+    return commands
+
+
+def _run_plain_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return subprocess.CompletedProcess(command, 1, "", str(exc))
+
+
+def _chafa_failure_reason(stderr: str | None, source: Path) -> str:
+    reason = (stderr or "unknown Chafa error").strip()
+    if source.suffix.casefold() == ".svg" and "Error loading" in reason:
+        return (
+            "Chafa could not load SVG; install SVG rasterizer: "
+            "sudo apt install librsvg2-bin"
+        )
+    return reason
+
+
+def _run_chafa_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         completed = subprocess.run(
             command,
@@ -319,18 +610,133 @@ def _chafa_logo_art(
             text=True,
             timeout=10,
         )
-    except (OSError, subprocess.SubprocessError):
-        return []
+    except (OSError, subprocess.SubprocessError) as exc:
+        return subprocess.CompletedProcess(command, 1, "", str(exc))
 
-    if completed.returncode != 0:
-        return []
+    if completed.returncode == 0 and completed.stdout:
+        return completed
+    if os.name == "nt":
+        return completed
 
+    terminal_completed = _run_chafa_command_in_pty(command)
+    if terminal_completed.stdout or terminal_completed.returncode != 0:
+        return terminal_completed
+    return completed
+
+
+def _run_chafa_command_in_pty(
+    command: list[str],
+) -> subprocess.CompletedProcess[str]:
+    try:
+        import pty
+    except ImportError:
+        return subprocess.CompletedProcess(
+            command, 1, "", "pty is unavailable"
+        )
+
+    master_fd: int | None = None
+    slave_fd: int | None = None
+    process = None
+    chunks: list[bytes] = []
+
+    try:
+        master_fd, slave_fd = pty.openpty()
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=slave_fd,
+            stderr=subprocess.PIPE,
+            env=env,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+        slave_fd = None
+
+        while process.poll() is None:
+            readable, _writable, _errors = select.select(
+                [master_fd], [], [], 0.1
+            )
+            if not readable:
+                continue
+            try:
+                chunk = os.read(master_fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+
+        while True:
+            readable, _writable, _errors = select.select(
+                [master_fd], [], [], 0
+            )
+            if not readable:
+                break
+            try:
+                chunk = os.read(master_fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+
+        stderr = process.stderr.read() if process.stderr is not None else b""
+        return subprocess.CompletedProcess(
+            command,
+            process.wait(timeout=1),
+            b"".join(chunks).decode(errors="replace"),
+            stderr.decode(errors="replace"),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return subprocess.CompletedProcess(command, 1, "", str(exc))
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+        for fd in (slave_fd, master_fd):
+            if fd is None:
+                continue
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _write_chafa_failure_hint(reason: str | None) -> None:
+    global _CHAFA_FAILURE_SHOWN
+
+    if _CHAFA_FAILURE_SHOWN:
+        return
+
+    _CHAFA_FAILURE_SHOWN = True
+    terminal_width = shutil.get_terminal_size((100, 20)).columns
+    reason = (reason or "unknown Chafa error").strip().splitlines()[0]
+    if len(reason) > 100:
+        reason = f"{reason[:97]}..."
     lines = [
-        _strip_ansi(line).rstrip()
-        for line in completed.stdout.splitlines()
-        if line.strip()
+        "",
+        _center_terminal_line(
+            f"Chafa logo rendering failed: {reason}",
+            terminal_width,
+        ),
+        _center_terminal_line(
+            "Try reinstalling Chafa: sudo apt install chafa",
+            terminal_width,
+        ),
+        "",
     ]
-    return _trim_ascii_canvas(lines)
+    _LIVE_PROGRESS.write("\n".join(lines))
+
+
+def _chafa_color_mode() -> str:
+    color_term_value = os.environ.get("COLORTERM", "").casefold()
+    if "truecolor" in color_term_value or "24bit" in color_term_value:
+        return "full"
+    if "256color" in os.environ.get("TERM", "").casefold():
+        return "256"
+    return "16"
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -348,87 +754,28 @@ def _svg_file_view_box(path: Path) -> tuple[float, float, float, float] | None:
     return _svg_view_box(root)
 
 
-def _svg_ascii_art(
-    path: Path,
+def _center_terminal_line(
+    line: str,
+    terminal_width: int,
     *,
-    width: int,
-    height: int | None = None,
-    cell_aspect_ratio: float = 2.0,
-) -> list[str]:
-    try:
-        root = ET.fromstring(path.read_text(encoding="utf-8"))
-    except (OSError, ET.ParseError, UnicodeDecodeError):
-        return []
-
-    view_box = _svg_view_box(root)
-    if view_box is None:
-        return []
-
-    min_x, min_y, box_width, box_height = view_box
-    if box_width <= 0 or box_height <= 0:
-        return []
-
-    if height is None:
-        height = max(
-            4,
-            round(width * (box_height / box_width) / cell_aspect_ratio),
-        )
-
-    paths = []
-    for element in root.iter():
-        if not element.tag.endswith("path"):
-            continue
-        d = element.attrib.get("d")
-        if not d:
-            continue
-        transform = _svg_transform(element.attrib.get("transform"))
-        paths.extend(_path_polylines(d, transform))
-
-    if not paths:
-        return []
-
-    canvas = []
-    for row in range(height):
-        upper_y = min_y + ((row + 0.25) / height) * box_height
-        lower_y = min_y + ((row + 0.75) / height) * box_height
-        cells = []
-        for col in range(width):
-            x = min_x + ((col + 0.5) / width) * box_width
-            upper = _point_in_paths(x, upper_y, paths)
-            lower = _point_in_paths(x, lower_y, paths)
-            if upper and lower:
-                cells.append("#")
-            elif upper:
-                cells.append("^")
-            elif lower:
-                cells.append("_")
-            else:
-                cells.append(" ")
-        canvas.append("".join(cells).rstrip())
-
-    return _trim_ascii_canvas(canvas)
-
-
-def _center_terminal_line(line: str, terminal_width: int) -> str:
-    visible = len(line)
+    ansi: bool = False,
+) -> str:
+    visible = len(_strip_ansi(line)) if ansi else len(line)
     if visible >= terminal_width:
         return line
     return (" " * ((terminal_width - visible) // 2)) + line
 
 
-def _trim_ascii_canvas(canvas: list[str]) -> list[str]:
-    rows = [line.rstrip() for line in canvas]
-    while rows and not rows[0].strip():
-        rows.pop(0)
-    while rows and not rows[-1].strip():
-        rows.pop()
-    if not rows:
-        return []
-
-    left = min(
-        len(line) - len(line.lstrip(" ")) for line in rows if line.strip()
+def _center_terminal_block(
+    block: str,
+    terminal_width: int,
+    *,
+    ansi: bool = False,
+) -> str:
+    return "\n".join(
+        _center_terminal_line(line, terminal_width, ansi=ansi)
+        for line in block.rstrip("\n").splitlines()
     )
-    return [line[left:] for line in rows]
 
 
 def _svg_view_box(
@@ -452,222 +799,6 @@ def _svg_number(value: str | None) -> float | None:
         return None
     match = re.match(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", value)
     return float(match.group(0)) if match else None
-
-
-def _svg_transform(value: str | None):
-    if not value:
-        return lambda x, y: (x, y)
-    matrix = re.search(r"matrix\(([^)]+)\)", value)
-    if not matrix:
-        return lambda x, y: (x, y)
-
-    parts = [
-        float(part) for part in re.split(r"[\s,]+", matrix.group(1).strip())
-    ]
-    if len(parts) != 6:
-        return lambda x, y: (x, y)
-    a, b, c, d, e, f = parts
-    return lambda x, y: (a * x + c * y + e, b * x + d * y + f)
-
-
-_PATH_TOKEN_RE = re.compile(
-    r"[AaCcHhLlMmQqSsTtVvZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?"
-)
-
-
-def _path_polylines(d: str, transform) -> list[list[tuple[float, float]]]:
-    tokens = _PATH_TOKEN_RE.findall(d)
-    paths: list[list[tuple[float, float]]] = []
-    current: list[tuple[float, float]] = []
-    index = 0
-    command = ""
-    x = y = 0.0
-    start_x = start_y = 0.0
-    last_cubic: tuple[float, float] | None = None
-    last_quad: tuple[float, float] | None = None
-
-    def is_cmd(token: str) -> bool:
-        return len(token) == 1 and token.isalpha()
-
-    def num() -> float:
-        nonlocal index
-        value = float(tokens[index])
-        index += 1
-        return value
-
-    def point(px: float, py: float) -> tuple[float, float]:
-        return transform(px, py)
-
-    def add(px: float, py: float) -> None:
-        current.append(point(px, py))
-
-    def close_path() -> None:
-        nonlocal current
-        if current:
-            current.append(point(start_x, start_y))
-            paths.append(current)
-            current = []
-
-    while index < len(tokens):
-        if is_cmd(tokens[index]):
-            command = tokens[index]
-            index += 1
-        if not command:
-            break
-
-        absolute = command.isupper()
-        cmd = command.upper()
-
-        if cmd == "M":
-            if current:
-                paths.append(current)
-                current = []
-            nx, ny = num(), num()
-            x, y = (nx, ny) if absolute else (x + nx, y + ny)
-            start_x, start_y = x, y
-            add(x, y)
-            command = "L" if absolute else "l"
-        elif cmd == "L":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                nx, ny = num(), num()
-                x, y = (nx, ny) if absolute else (x + nx, y + ny)
-                add(x, y)
-            last_cubic = last_quad = None
-        elif cmd == "H":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                nx = num()
-                x = nx if absolute else x + nx
-                add(x, y)
-            last_cubic = last_quad = None
-        elif cmd == "V":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                ny = num()
-                y = ny if absolute else y + ny
-                add(x, y)
-            last_cubic = last_quad = None
-        elif cmd == "C":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                x1, y1, x2, y2, x3, y3 = (
-                    num(),
-                    num(),
-                    num(),
-                    num(),
-                    num(),
-                    num(),
-                )
-                if not absolute:
-                    x1, y1, x2, y2, x3, y3 = (
-                        x + x1,
-                        y + y1,
-                        x + x2,
-                        y + y2,
-                        x + x3,
-                        y + y3,
-                    )
-                for step in range(1, 9):
-                    t = step / 8
-                    px = _cubic(x, x1, x2, x3, t)
-                    py = _cubic(y, y1, y2, y3, t)
-                    add(px, py)
-                x, y = x3, y3
-                last_cubic = (x2, y2)
-                last_quad = None
-        elif cmd == "S":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                x1, y1 = (
-                    (2 * x - last_cubic[0], 2 * y - last_cubic[1])
-                    if last_cubic
-                    else (x, y)
-                )
-                x2, y2, x3, y3 = num(), num(), num(), num()
-                if not absolute:
-                    x2, y2, x3, y3 = x + x2, y + y2, x + x3, y + y3
-                for step in range(1, 9):
-                    t = step / 8
-                    add(_cubic(x, x1, x2, x3, t), _cubic(y, y1, y2, y3, t))
-                x, y = x3, y3
-                last_cubic = (x2, y2)
-                last_quad = None
-        elif cmd == "Q":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                x1, y1, x2, y2 = num(), num(), num(), num()
-                if not absolute:
-                    x1, y1, x2, y2 = x + x1, y + y1, x + x2, y + y2
-                for step in range(1, 9):
-                    t = step / 8
-                    add(_quad(x, x1, x2, t), _quad(y, y1, y2, t))
-                x, y = x2, y2
-                last_quad = (x1, y1)
-                last_cubic = None
-        elif cmd == "T":
-            while index < len(tokens) and not is_cmd(tokens[index]):
-                x1, y1 = (
-                    (2 * x - last_quad[0], 2 * y - last_quad[1])
-                    if last_quad
-                    else (x, y)
-                )
-                x2, y2 = num(), num()
-                if not absolute:
-                    x2, y2 = x + x2, y + y2
-                for step in range(1, 9):
-                    t = step / 8
-                    add(_quad(x, x1, x2, t), _quad(y, y1, y2, t))
-                x, y = x2, y2
-                last_quad = (x1, y1)
-                last_cubic = None
-        elif cmd == "Z":
-            close_path()
-            x, y = start_x, start_y
-            last_cubic = last_quad = None
-        else:
-            # Arc support is intentionally coarse; consume parameters and mark
-            # the endpoint so logos with arcs still produce a recognizable map.
-            while index + 6 < len(tokens) and not is_cmd(tokens[index]):
-                _rx, _ry, _rot, _large, _sweep = (
-                    num(),
-                    num(),
-                    num(),
-                    num(),
-                    num(),
-                )
-                nx, ny = num(), num()
-                x, y = (nx, ny) if absolute else (x + nx, y + ny)
-                add(x, y)
-
-    if current:
-        paths.append(current)
-    return paths
-
-
-def _cubic(a: float, b: float, c: float, d: float, t: float) -> float:
-    u = 1 - t
-    return (u**3 * a) + (3 * u * u * t * b) + (3 * u * t * t * c) + (t**3 * d)
-
-
-def _quad(a: float, b: float, c: float, t: float) -> float:
-    u = 1 - t
-    return (u * u * a) + (2 * u * t * b) + (t * t * c)
-
-
-def _point_in_paths(
-    x: float,
-    y: float,
-    paths: list[list[tuple[float, float]]],
-) -> bool:
-    inside = False
-    for path in paths:
-        for index, point in enumerate(path):
-            x1, y1 = point
-            x2, y2 = path[(index + 1) % len(path)]
-            if math.isclose(y1, y2):
-                continue
-            crosses = (y1 > y) != (y2 > y)
-            if not crosses:
-                continue
-            intersect_x = x1 + ((y - y1) * (x2 - x1) / (y2 - y1))
-            if intersect_x > x:
-                inside = not inside
-    return inside
 
 
 class _ProgressBar:
